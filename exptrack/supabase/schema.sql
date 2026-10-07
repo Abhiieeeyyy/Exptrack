@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS collections (
     donor_address TEXT, -- Area of collection & location
     donor_phone VARCHAR(50),
     amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+    payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID' CHECK (payment_status IN ('PAID', 'PENDING')),
     payment_mode VARCHAR(30) NOT NULL CHECK (payment_mode IN ('CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE')),
     reference_number VARCHAR(100), -- Cheque No / Bank UTR (Optional for UPI/CASH)
     notes TEXT,
@@ -111,7 +112,7 @@ ALTER TABLE expenses DISABLE ROW LEVEL SECURITY;
 -- Passwords below match demo passkeys/passwords ('admin123' and 'member123')
 INSERT INTO users (id, username, password_hash, full_name, role, phone)
 VALUES 
-    ('a0000000-0000-0000-0000-000000000001', 'admin', 'admin123', 'Rajesh Sharma', 'ADMIN', '+91 98765 43210'),
+    ('a0000000-0000-0000-0000-000000000001', 'admin', 'Admin@skat369', 'Rajesh Sharma', 'ADMIN', '+91 98765 43210'),
     ('b0000000-0000-0000-0000-000000000002', 'amit', 'member123', 'Amit Patel', 'USER', '+91 98765 43211'),
     ('c0000000-0000-0000-0000-000000000003', 'priya', 'member123', 'Priya Verma', 'USER', '+91 98765 43212')
 ON CONFLICT (username) DO NOTHING;

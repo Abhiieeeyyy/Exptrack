@@ -66,6 +66,7 @@ export default function RecordCollection({ onCollectionAdded }) {
   const [donorAddress, setDonorAddress] = useState('');
   const [donorPhone, setDonorPhone] = useState('');
   const [amount, setAmount] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState('PAID'); // 'PAID' (Received Now) or 'PENDING' (Receipt Given, Will Pay Later)
   const [paymentMode, setPaymentMode] = useState('UPI');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
@@ -230,6 +231,7 @@ export default function RecordCollection({ onCollectionAdded }) {
         donor_address: (donorAddress || currentArea).trim(),
         donor_phone: donorPhone.trim(),
         amount: Number(amount),
+        payment_status: paymentStatus,
         payment_mode: paymentMode,
         reference_number: (paymentMode === 'UPI' || paymentMode === 'CASH') ? '' : referenceNumber.trim(),
         notes: notes.trim(),
@@ -250,6 +252,7 @@ export default function RecordCollection({ onCollectionAdded }) {
       setDonorName('');
       setDonorPhone('');
       setAmount('');
+      setPaymentStatus('PAID');
       setReferenceNumber('');
       setNotes('');
 
@@ -502,10 +505,67 @@ export default function RecordCollection({ onCollectionAdded }) {
 
         </div>
 
+        {/* Payment Collection Status Option */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+            Collection &amp; Payment Status <span className="text-rose-500">*</span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setPaymentStatus('PAID')}
+              className={`flex items-center gap-3 p-3.5 rounded-xl border text-left transition cursor-pointer ${
+                paymentStatus === 'PAID'
+                  ? 'border-emerald-600 bg-emerald-50/80 text-emerald-950 ring-2 ring-emerald-500/20 shadow-xs'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-base shrink-0 ${
+                paymentStatus === 'PAID' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+              }`}>
+                ✓
+              </div>
+              <div>
+                <div className="text-xs font-bold">Amount Received Now</div>
+                <div className="text-[11px] text-slate-500">Cash / UPI collected along with receipt</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPaymentStatus('PENDING')}
+              className={`flex items-center gap-3 p-3.5 rounded-xl border text-left transition cursor-pointer ${
+                paymentStatus === 'PENDING'
+                  ? 'border-amber-500 bg-amber-50/90 text-amber-950 ring-2 ring-amber-500/20 shadow-xs'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-base shrink-0 ${
+                paymentStatus === 'PENDING' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'
+              }`}>
+                ⏳
+              </div>
+              <div>
+                <div className="text-xs font-bold">Receipt Issued • Payment Later</div>
+                <div className="text-[11px] text-slate-500">Trackable as pending; update when paid</div>
+              </div>
+            </button>
+          </div>
+
+          {paymentStatus === 'PENDING' && (
+            <div className="mt-2.5 p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2 animate-in fade-in">
+              <span className="text-amber-600 font-bold">ℹ️</span>
+              <span>
+                <strong>Pending Collection:</strong> Leaf #{receiptNumber} will be issued to the donor and recorded. You can update this entry to &quot;Paid&quot; anytime from your <strong>My Book &amp; History</strong> tab once the money is received.
+              </span>
+            </div>
+          )}
+        </div>
+
         {/* Payment Mode Selection */}
         <div>
           <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-            Payment Mode <span className="text-rose-500">*</span>
+            {paymentStatus === 'PENDING' ? 'Expected / Promised Payment Mode' : 'Payment Mode'} <span className="text-rose-500">*</span>
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {PAYMENT_MODES.map((mode) => {

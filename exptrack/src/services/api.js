@@ -5,7 +5,7 @@ const INITIAL_USERS = [
   {
     id: 'u-admin-1',
     username: 'admin',
-    password: 'password123',
+    password: 'Admin@skat369',
     full_name: 'Rajesh Sharma',
     role: 'ADMIN',
     phone: '+91 98765 43210',
@@ -258,9 +258,6 @@ export const api = {
         if (!error && data) {
           const dbHash = data.password_hash || data.password || '';
           const isDirectMatch = dbHash === cleanPass;
-          const isDemoMatch = (cleanPass === 'admin123' && data.role === 'ADMIN') ||
-                              (cleanPass === 'member123') ||
-                              (cleanPass === 'password123');
 
           // Check if updated in local store as well
           const localUsers = getStore('users', INITIAL_USERS);
@@ -270,7 +267,7 @@ export const api = {
             localUser.password_hash === cleanPass
           );
 
-          if (isDirectMatch || isDemoMatch || isLocalMatch) {
+          if (isDirectMatch || isLocalMatch) {
             // Synchronize into local store
             const lIdx = localUsers.findIndex(u => u.username.toLowerCase() === cleanUser);
             if (lIdx !== -1) {
@@ -287,9 +284,14 @@ export const api = {
               role: data.role,
               phone: data.phone
             };
+          } else {
+            throw new Error('Invalid username or password');
           }
         }
       } catch (err) {
+        if (err.message === 'Invalid username or password') {
+          throw err;
+        }
         console.warn('Supabase auth fallback to local store:', err.message);
       }
     }
@@ -303,11 +305,7 @@ export const api = {
     }
 
     const storedPass = user.password || user.password_hash || '';
-    const isLocalPassMatch = (storedPass === cleanPass) ||
-                             (user.password_hash === cleanPass) ||
-                             (cleanPass === 'admin123' && user.role === 'ADMIN') ||
-                             (cleanPass === 'member123') ||
-                             (cleanPass === 'password123');
+    const isLocalPassMatch = (storedPass === cleanPass);
 
     if (!isLocalPassMatch) {
       throw new Error('Invalid username or password');
@@ -396,10 +394,10 @@ export const api = {
   },
 
   // --------------------------------------------------------------------------
-  // COLLECTIONS (Income)
+  // COLLECTIONS (Income) & PENDING PAYMENT TRACKING
   // --------------------------------------------------------------------------
   async createCollection(collectionData) {
-    const { receipt_book_number, amount, donor_name, payment_mode } = collectionData;
+    const { receipt_book_number, amount, donor_name, payment_mode, payment_status } = collectionData;
     
     if (!receipt_book_number || !receipt_book_number.trim()) {
       throw { field: 'receipt_book_number', message: 'Receipt Book Number is required' };
@@ -416,6 +414,9 @@ export const api = {
     }
 
     const cleanReceiptNo = receipt_book_number.trim().toUpperCase();
+    const isPending = payment_status === 'PENDING';
+    const rawUserNotes = (collectionData.notes || '').replace(/\[PAYMENT_PENDING\]/g, '').trim();
+    const storedNotes = isPending ? `[PAYMENT_PENDING] ${rawUserNotes}`.trim() : rawUserNotes;
 
     if (isSupabaseConfigured()) {
       try {
@@ -441,7 +442,7 @@ export const api = {
             amount: numAmount,
             payment_mode: payment_mode,
             reference_number: collectionData.reference_number || '',
-            notes: collectionData.notes || ''
+            notes: storedNotes
           }])
           .select()
           .single();
@@ -453,17 +454,24 @@ export const api = {
           throw error;
         }
 
+        const formatted = {
+          ...data,
+          payment_status: isPending ? 'PENDING' : 'PAID',
+          notes: rawUserNotes,
+          collector_name: collectionData.collector_name || 'Member'
+        };
+
         // Keep local storage in sync
         const collections = getStore('collections', INITIAL_COLLECTIONS);
         const idx = collections.findIndex(c => c.receipt_book_number.toUpperCase() === cleanReceiptNo);
         if (idx >= 0) {
-          collections[idx] = { ...data, collector_name: collectionData.collector_name || 'Member' };
+          collections[idx] = formatted;
         } else {
-          collections.unshift({ ...data, collector_name: collectionData.collector_name || 'Member' });
+          collections.unshift(formatted);
         }
         setStore('collections', collections);
 
-        return data;
+        return formatted;
       } catch (err) {
         if (err.field) throw err;
         console.warn('Supabase fallback to local storage for collection:', err);
@@ -487,8 +495,9 @@ export const api = {
       donor_phone: collectionData.donor_phone || '',
       amount: numAmount,
       payment_mode: payment_mode,
+      payment_status: isPending ? 'PENDING' : 'PAID',
       reference_number: collectionData.reference_number || '',
-      notes: collectionData.notes || '',
+      notes: rawUserNotes,
       created_at: new Date().toISOString()
     };
 
@@ -497,7 +506,9 @@ export const api = {
     return newCollection;
   },
 
-  async getCollections({ search = '', mode = '', memberId = '', dateFrom = '', dateTo = '' } = {}) {
+  async getCollections({ search = '', mode = '', status = '', memberId = '', dateFrom = '', dateTo = '' } = {}) {
+    let result = [];
+
     if (isSupabaseConfigured()) {
       try {
         let query = supabase.from('collections').select(`
@@ -517,47 +528,68 @@ export const api = {
 
         const { data, error } = await query;
         if (!error && data) {
-          return data.map(item => ({
-            ...item,
-            collector_name: item.users ? item.users.full_name : 'Unknown Member'
-          }));
+          result = data.map(item => {
+            const isPending = (item.notes && item.notes.includes('[PAYMENT_PENDING]')) || item.payment_status === 'PENDING';
+            const cleanNotes = (item.notes || '').replace(/\[PAYMENT_PENDING\]/g, '').trim();
+            return {
+              ...item,
+              payment_status: isPending ? 'PENDING' : 'PAID',
+              notes: cleanNotes,
+              collector_name: item.users ? item.users.full_name : 'Unknown Member'
+            };
+          });
         }
       } catch (err) {
         console.warn('Supabase collections query error:', err);
       }
     }
 
-    // Local fallback
-    let collections = getStore('collections', INITIAL_COLLECTIONS);
-    
-    if (memberId) {
-      collections = collections.filter(c => c.collected_by_user_id === memberId);
-    }
-    if (mode && mode !== 'ALL') {
-      collections = collections.filter(c => c.payment_mode === mode);
-    }
-    if (search) {
-      const q = search.toLowerCase();
-      collections = collections.filter(c => 
-        c.donor_name.toLowerCase().includes(q) || 
-        c.receipt_book_number.toLowerCase().includes(q) ||
-        (c.collector_name && c.collector_name.toLowerCase().includes(q))
-      );
-    }
-    if (dateFrom) {
-      const from = new Date(dateFrom).getTime();
-      collections = collections.filter(c => new Date(c.created_at).getTime() >= from);
-    }
-    if (dateTo) {
-      const to = new Date(dateTo).setHours(23, 59, 59, 999);
-      collections = collections.filter(c => new Date(c.created_at).getTime() <= to);
+    if (result.length === 0) {
+      // Local fallback
+      let collections = getStore('collections', INITIAL_COLLECTIONS);
+      
+      if (memberId) {
+        collections = collections.filter(c => c.collected_by_user_id === memberId);
+      }
+      if (mode && mode !== 'ALL') {
+        collections = collections.filter(c => c.payment_mode === mode);
+      }
+      if (search) {
+        const q = search.toLowerCase();
+        collections = collections.filter(c => 
+          c.donor_name.toLowerCase().includes(q) || 
+          c.receipt_book_number.toLowerCase().includes(q) ||
+          (c.collector_name && c.collector_name.toLowerCase().includes(q))
+        );
+      }
+      if (dateFrom) {
+        const from = new Date(dateFrom).getTime();
+        collections = collections.filter(c => new Date(c.created_at).getTime() >= from);
+      }
+      if (dateTo) {
+        const to = new Date(dateTo).setHours(23, 59, 59, 999);
+        collections = collections.filter(c => new Date(c.created_at).getTime() <= to);
+      }
+
+      result = collections.map(c => {
+        const isPending = (c.notes && c.notes.includes('[PAYMENT_PENDING]')) || c.payment_status === 'PENDING';
+        return {
+          ...c,
+          payment_status: isPending ? 'PENDING' : 'PAID',
+          notes: (c.notes || '').replace(/\[PAYMENT_PENDING\]/g, '').trim()
+        };
+      });
     }
 
-    return collections;
+    if (status && status !== 'ALL') {
+      result = result.filter(c => c.payment_status === status);
+    }
+
+    return result;
   },
 
   async updateCollection(collectionId, collectionData) {
-    const { receipt_book_number, amount, donor_name, payment_mode } = collectionData;
+    const { receipt_book_number, amount, donor_name, payment_mode, payment_status } = collectionData;
     
     if (!receipt_book_number || !receipt_book_number.trim()) {
       throw { field: 'receipt_book_number', message: 'Receipt Book Number is required' };
@@ -573,67 +605,96 @@ export const api = {
       throw { field: 'payment_mode', message: 'Payment mode is required' };
     }
 
+    const isPending = payment_status === 'PENDING';
+    const rawUserNotes = (collectionData.notes || '').replace(/\[PAYMENT_PENDING\]/g, '').trim();
+    const storedNotes = isPending ? `[PAYMENT_PENDING] ${rawUserNotes}`.trim() : rawUserNotes;
+    const cleanReceiptNo = receipt_book_number.trim().toUpperCase();
+
     if (isSupabaseConfigured()) {
       try {
         const { data: existing } = await supabase
           .from('collections')
           .select('id')
-          .eq('receipt_book_number', receipt_book_number.trim())
+          .eq('receipt_book_number', cleanReceiptNo)
           .neq('id', collectionId)
           .maybeSingle();
 
         if (existing) {
-          throw { field: 'receipt_book_number', message: `Receipt ${receipt_book_number} already recorded in system (Leaf Conflict 409)` };
+          throw { field: 'receipt_book_number', message: `Receipt ${cleanReceiptNo} already recorded in system (Leaf Conflict 409)` };
         }
 
         const { data, error } = await supabase
           .from('collections')
           .update({
-            receipt_book_number: receipt_book_number.trim().toUpperCase(),
+            receipt_book_number: cleanReceiptNo,
             donor_name: donor_name.trim(),
             donor_address: collectionData.donor_address || '',
             donor_phone: collectionData.donor_phone || '',
             amount: numAmount,
             payment_mode: payment_mode,
             reference_number: collectionData.reference_number || '',
-            notes: collectionData.notes || ''
+            notes: storedNotes
           })
           .eq('id', collectionId)
           .select()
           .single();
 
-        if (error) throw error;
-        return data;
+        if (!error && data) {
+          const formatted = {
+            ...data,
+            payment_status: isPending ? 'PENDING' : 'PAID',
+            notes: rawUserNotes
+          };
+          const collections = getStore('collections', INITIAL_COLLECTIONS);
+          const idx = collections.findIndex(c => c.id === collectionId);
+          if (idx >= 0) {
+            collections[idx] = { ...collections[idx], ...formatted };
+            setStore('collections', collections);
+          }
+          return formatted;
+        }
       } catch (err) {
         if (err.field) throw err;
-        console.warn('Supabase updateCollection error fallback:', err);
+        console.warn('Supabase updateCollection error:', err);
       }
     }
 
     const collections = getStore('collections', INITIAL_COLLECTIONS);
     const idx = collections.findIndex(c => c.id === collectionId);
-    if (idx === -1) throw new Error('Collection entry not found');
-
-    const duplicate = collections.find(c => c.id !== collectionId && c.receipt_book_number.toLowerCase() === receipt_book_number.trim().toLowerCase());
-    if (duplicate) {
-      throw { field: 'receipt_book_number', message: `Receipt #${receipt_book_number} already recorded in system (Leaf Conflict 409)` };
-    }
+    if (idx === -1) throw new Error('Collection record not found');
 
     collections[idx] = {
       ...collections[idx],
-      receipt_book_number: receipt_book_number.trim().toUpperCase(),
+      receipt_book_number: cleanReceiptNo,
       donor_name: donor_name.trim(),
       donor_address: collectionData.donor_address || '',
       donor_phone: collectionData.donor_phone || '',
       amount: numAmount,
       payment_mode: payment_mode,
+      payment_status: isPending ? 'PENDING' : 'PAID',
       reference_number: collectionData.reference_number || '',
-      notes: collectionData.notes || '',
+      notes: rawUserNotes,
       updated_at: new Date().toISOString()
     };
 
     setStore('collections', collections);
     return collections[idx];
+  },
+
+  async markCollectionAsPaid(collectionId, { payment_mode = 'CASH', reference_number = '', notes = '' } = {}) {
+    const collections = await this.getCollections();
+    const target = collections.find(c => c.id === collectionId);
+    if (!target) throw new Error('Collection record not found');
+
+    const updated = await this.updateCollection(collectionId, {
+      ...target,
+      payment_mode: payment_mode || target.payment_mode || 'CASH',
+      reference_number: reference_number || target.reference_number || '',
+      notes: notes || target.notes || '',
+      payment_status: 'PAID'
+    });
+
+    return updated;
   },
 
   // --------------------------------------------------------------------------
@@ -915,15 +976,20 @@ export const api = {
     const collections = await this.getCollections();
     const expenses = await this.getExpenses();
 
-    // 1. Total Income = Sum of all collections
-    const totalIncome = collections.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    // 1. Total Income & Collections breakdown (Received vs Pending Payment)
+    const paidCollections = collections.filter(c => c.payment_status !== 'PENDING');
+    const pendingCols = collections.filter(c => c.payment_status === 'PENDING');
+
+    const totalReceivedIncome = paidCollections.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    const totalPendingCollections = pendingCols.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    const totalPledgedIncome = totalReceivedIncome + totalPendingCollections;
 
     // 2. Total Approved Expenses = Sum of APPROVED expenses ONLY
     const approvedExpensesList = expenses.filter(e => e.status === 'APPROVED');
     const totalApprovedExpenses = approvedExpensesList.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
-    // 3. Net Balance = Income - Approved Expenses
-    const netBalance = totalIncome - totalApprovedExpenses;
+    // 3. Net Cash Balance = Received Income - Approved Expenses
+    const netBalance = totalReceivedIncome - totalApprovedExpenses;
 
     // 4. Pending bills count & amount
     const pendingExpenses = expenses.filter(e => e.status === 'PENDING');
@@ -940,14 +1006,19 @@ export const api = {
       categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + Number(e.amount || 0);
     });
 
-    // 7. Payment mode breakdown for collections
+    // 7. Payment mode breakdown for collections (only received)
     const paymentModeBreakdown = {};
-    collections.forEach(c => {
+    paidCollections.forEach(c => {
       paymentModeBreakdown[c.payment_mode] = (paymentModeBreakdown[c.payment_mode] || 0) + Number(c.amount || 0);
     });
 
     return {
-      totalIncome,
+      totalIncome: totalReceivedIncome,
+      totalReceivedIncome,
+      totalPendingCollections,
+      totalPledgedIncome,
+      pendingCollectionsCount: pendingCols.length,
+      paidCollectionsCount: paidCollections.length,
       totalApprovedExpenses,
       netBalance,
       pendingCount,

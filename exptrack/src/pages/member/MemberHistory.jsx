@@ -33,12 +33,18 @@ export default function MemberHistory() {
   // Modals state
   const [previewExpense, setPreviewExpense] = useState(null);
   const [editingCollection, setEditingCollection] = useState(null);
+  const [quickPayCollection, setQuickPayCollection] = useState(null);
+  const [quickPayMode, setQuickPayMode] = useState('CASH');
+  const [quickPayRef, setQuickPayRef] = useState('');
+  const [quickPaySaving, setQuickPaySaving] = useState(false);
+
   const [editColForm, setEditColForm] = useState({
     receipt_book_number: '',
     donor_name: '',
     donor_phone: '',
     donor_address: '',
     amount: '',
+    payment_status: 'PAID',
     payment_mode: 'UPI',
     reference_number: '',
     notes: '',
@@ -80,7 +86,13 @@ export default function MemberHistory() {
     }
   }, [user]);
 
+  const receivedCollections = collections.filter(c => c.payment_status !== 'PENDING');
+  const pendingCollections = collections.filter(c => c.payment_status === 'PENDING');
+
+  const totalCollectedReceived = receivedCollections.reduce((s, c) => s + Number(c.amount || 0), 0);
+  const totalPendingCollected = pendingCollections.reduce((s, c) => s + Number(c.amount || 0), 0);
   const totalCollected = collections.reduce((s, c) => s + Number(c.amount || 0), 0);
+
   const totalApprovedExp = expenses
     .filter(e => e.status === 'APPROVED')
     .reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -93,7 +105,8 @@ export default function MemberHistory() {
       (c.donor_name && c.donor_name.toLowerCase().includes(q)) ||
       (c.receipt_book_number && c.receipt_book_number.toLowerCase().includes(q)) ||
       (c.payment_mode && c.payment_mode.toLowerCase().includes(q)) ||
-      (c.donor_address && c.donor_address.toLowerCase().includes(q))
+      (c.donor_address && c.donor_address.toLowerCase().includes(q)) ||
+      (c.payment_status && c.payment_status.toLowerCase().includes(q))
     );
   });
 
@@ -107,6 +120,34 @@ export default function MemberHistory() {
     );
   });
 
+  // Open Quick Pay Modal
+  const handleOpenQuickPay = (col) => {
+    setQuickPayCollection(col);
+    setQuickPayMode(col.payment_mode || 'CASH');
+    setQuickPayRef(col.reference_number || '');
+  };
+
+  const handleConfirmQuickPay = async (e) => {
+    e.preventDefault();
+    if (!quickPayCollection) return;
+    setQuickPaySaving(true);
+    try {
+      await api.markCollectionAsPaid(quickPayCollection.id, {
+        payment_mode: quickPayMode,
+        reference_number: quickPayRef.trim(),
+        notes: quickPayCollection.notes || ''
+      });
+      setNotificationMsg(`Receipt #${quickPayCollection.receipt_book_number} marked as Received (Paid).`);
+      setTimeout(() => setNotificationMsg(null), 4000);
+      setQuickPayCollection(null);
+      loadData();
+    } catch (err) {
+      alert('Failed to mark as paid: ' + err.message);
+    } finally {
+      setQuickPaySaving(false);
+    }
+  };
+
   // Open Edit Collection Modal
   const handleStartEditCollection = (col) => {
     setEditingCollection(col);
@@ -116,6 +157,7 @@ export default function MemberHistory() {
       donor_phone: col.donor_phone || '',
       donor_address: col.donor_address || '',
       amount: String(col.amount || ''),
+      payment_status: col.payment_status || 'PAID',
       payment_mode: col.payment_mode || 'UPI',
       reference_number: col.reference_number || '',
       notes: col.notes || '',
@@ -148,6 +190,7 @@ export default function MemberHistory() {
         donor_phone: editColForm.donor_phone.trim(),
         donor_address: editColForm.donor_address.trim(),
         amount: Number(editColForm.amount),
+        payment_status: editColForm.payment_status,
         payment_mode: editColForm.payment_mode,
         reference_number: (editColForm.payment_mode === 'UPI' || editColForm.payment_mode === 'CASH') ? '' : editColForm.reference_number.trim(),
         notes: editColForm.notes.trim(),
@@ -157,6 +200,7 @@ export default function MemberHistory() {
       setEditingCollection(null);
       setNotificationMsg(`Collection entry #${updated.receipt_book_number} updated successfully.`);
       setTimeout(() => setNotificationMsg(null), 4000);
+      loadData();
     } catch (err) {
       if (err.field) {
         setEditColErrors({ [err.field]: err.message });
@@ -236,24 +280,27 @@ export default function MemberHistory() {
             </p>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700">
-              <div className="text-[10px] uppercase font-bold text-slate-400">Total Collected</div>
+              <div className="text-[10px] uppercase font-bold text-slate-400">Total Received</div>
               <div className="text-sm sm:text-base font-extrabold text-emerald-400 mt-0.5">
-                {formatINR(totalCollected)}
+                {formatINR(totalCollectedReceived)}
               </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">{receivedCollections.length} Receipts Paid</div>
+            </div>
+            <div className="bg-slate-800/90 rounded-xl p-3 border border-amber-500/40 bg-amber-950/20">
+              <div className="text-[10px] uppercase font-bold text-amber-400">Pending Due</div>
+              <div className="text-sm sm:text-base font-extrabold text-amber-400 mt-0.5">
+                {formatINR(totalPendingCollected)}
+              </div>
+              <div className="text-[10px] text-amber-300/70 mt-0.5">{pendingCollections.length} Receipts Awaiting Payment</div>
             </div>
             <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700">
-              <div className="text-[10px] uppercase font-bold text-slate-400">Approved Bills</div>
+              <div className="text-[10px] uppercase font-bold text-slate-400">Approved Bills Spent</div>
               <div className="text-sm sm:text-base font-extrabold text-white mt-0.5">
                 {formatINR(totalApprovedExp)}
               </div>
-            </div>
-            <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700">
-              <div className="text-[10px] uppercase font-bold text-slate-400">Pending Bills</div>
-              <div className="text-sm sm:text-base font-extrabold text-amber-400 mt-0.5">
-                {pendingExpCount}
-              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">{pendingExpCount} Bills Pending Review</div>
             </div>
           </div>
         </div>
@@ -340,6 +387,7 @@ export default function MemberHistory() {
                   <th className="py-3.5 px-4">Receipt Leaf #</th>
                   <th className="py-3.5 px-4">Donor Name &amp; Contact</th>
                   <th className="py-3.5 px-4">Amount</th>
+                  <th className="py-3.5 px-4">Status</th>
                   <th className="py-3.5 px-4">Payment Mode</th>
                   <th className="py-3.5 px-4">Date</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
@@ -348,59 +396,85 @@ export default function MemberHistory() {
               <tbody className="divide-y divide-slate-100">
                 {filteredCollections.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-400">
+                    <td colSpan={7} className="py-8 text-center text-slate-400">
                       No collection entries found.
                     </td>
                   </tr>
                 ) : (
-                  filteredCollections.map((col) => (
-                    <tr key={col.id} className="hover:bg-slate-50/80 transition">
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
-                        {col.receipt_book_number}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-900">{col.donor_name}</div>
-                        {col.donor_address && (
-                          <div className="text-[11px] text-slate-500">{col.donor_address}</div>
-                        )}
-                        {col.donor_phone && (
-                          <div className="text-[11px] text-slate-400 font-mono">{col.donor_phone}</div>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 font-bold text-emerald-700 text-sm">
-                        {formatINR(col.amount, true)}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
-                          {col.payment_mode}
-                        </span>
-                        {col.reference_number && (
-                          <div className="text-[10px] font-mono text-slate-400 truncate max-w-[130px]">
-                            {col.reference_number}
+                  filteredCollections.map((col) => {
+                    const isPending = col.payment_status === 'PENDING';
+                    return (
+                      <tr key={col.id} className={`hover:bg-slate-50/80 transition ${isPending ? 'bg-amber-50/20' : ''}`}>
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
+                          {col.receipt_book_number}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-slate-900">{col.donor_name}</div>
+                          {col.donor_address && (
+                            <div className="text-[11px] text-slate-500">{col.donor_address}</div>
+                          )}
+                          {col.donor_phone && (
+                            <div className="text-[11px] text-slate-400 font-mono">{col.donor_phone}</div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-emerald-700 text-sm">
+                          {formatINR(col.amount, true)}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {isPending ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                              <span>⏳</span> Pending Due
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              <span>✓</span> Received
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                            {col.payment_mode}
+                          </span>
+                          {col.reference_number && (
+                            <div className="text-[10px] font-mono text-slate-400 truncate max-w-[130px]">
+                              {col.reference_number}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
+                          {new Date(col.created_at).toLocaleDateString('en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenQuickPay(col)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-lg transition cursor-pointer"
+                                title="Mark this pending collection as received / paid"
+                              >
+                                <span>✓ Mark Paid</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditCollection(col)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 rounded-lg border border-slate-200 transition cursor-pointer"
+                              title="Edit this collection record"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
                           </div>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
-                        {new Date(col.created_at).toLocaleDateString('en-IN', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric'
-                        })}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        {/* Edit Button in Place of Slip Generation Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleStartEditCollection(col)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 rounded-lg border border-slate-200 transition cursor-pointer"
-                          title="Edit this collection record"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                          <span>Edit</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -599,6 +673,36 @@ export default function MemberHistory() {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Payment Collection Status
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditColForm({ ...editColForm, payment_status: 'PAID' })}
+                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition ${
+                    editColForm.payment_status === 'PAID'
+                      ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                      : 'bg-white border-slate-300 text-slate-600'
+                  }`}
+                >
+                  ✓ Received (Paid)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditColForm({ ...editColForm, payment_status: 'PENDING' })}
+                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition ${
+                    editColForm.payment_status === 'PENDING'
+                      ? 'bg-amber-50 border-amber-500 text-amber-800'
+                      : 'bg-white border-slate-300 text-slate-600'
+                  }`}
+                >
+                  ⏳ Pending Due
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                 Payment Mode
               </label>
               <select
@@ -653,6 +757,90 @@ export default function MemberHistory() {
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>{editColSaving ? 'Saving...' : 'Save Changes'}</span>
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Quick Mark as Paid Modal */}
+      <Modal
+        isOpen={Boolean(quickPayCollection)}
+        onClose={() => setQuickPayCollection(null)}
+        title="Mark Collection as Received"
+        subtitle={`Confirm payment receipt for Leaf #${quickPayCollection?.receipt_book_number}`}
+        maxWidth="max-w-md"
+      >
+        {quickPayCollection && (
+          <form onSubmit={handleConfirmQuickPay} className="space-y-4">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-950 space-y-1">
+              <div className="flex justify-between">
+                <span className="font-medium text-emerald-800">Donor Name:</span>
+                <span className="font-bold">{quickPayCollection.donor_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-medium text-emerald-800">Leaf No:</span>
+                <span className="font-mono font-bold">{quickPayCollection.receipt_book_number}</span>
+              </div>
+              <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1 text-sm">
+                <span className="font-bold text-emerald-900">Amount Due:</span>
+                <span className="font-extrabold text-emerald-700">{formatINR(quickPayCollection.amount, true)}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                Payment Mode Received <span className="text-rose-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {PAYMENT_MODES.map(mode => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setQuickPayMode(mode.id)}
+                    className={`p-2.5 rounded-lg border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      quickPayMode === mode.id
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{mode.id === 'CASH' ? '💵' : mode.id === 'UPI' ? '📱' : mode.id === 'BANK_TRANSFER' ? '🏦' : '📄'}</span>
+                    <span>{mode.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {(quickPayMode === 'CHEQUE' || quickPayMode === 'BANK_TRANSFER') && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Reference / Cheque Number
+                </label>
+                <input
+                  type="text"
+                  value={quickPayRef}
+                  onChange={(e) => setQuickPayRef(e.target.value)}
+                  placeholder="e.g. CHQ-448201 or UTR-998273"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-mono text-slate-900 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setQuickPayCollection(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={quickPaySaving}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition disabled:opacity-50 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{quickPaySaving ? 'Updating...' : 'Confirm Received'}</span>
               </button>
             </div>
           </form>

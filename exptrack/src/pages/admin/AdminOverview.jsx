@@ -99,12 +99,16 @@ export default function AdminOverview({ onNavigate }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {/* KPI 1: Total Collections / Income */}
         <KpiCard
-          title="Total Income (Collections)"
-          value={metrics.totalIncome}
+          title="Total Collections Received"
+          value={metrics.totalReceivedIncome ?? metrics.totalIncome}
           variant="income"
           icon={TrendingUp}
-          badge={`${metrics.totalCollectionsCount} Receipts`}
-          subtitle="100% verified donor entries"
+          badge={`${metrics.paidCollectionsCount ?? metrics.totalCollectionsCount} Paid`}
+          subtitle={
+            metrics.totalPendingCollections > 0
+              ? `+ ${formatINR(metrics.totalPendingCollections)} (${metrics.pendingCollectionsCount} pending due)`
+              : '100% verified received in hand'
+          }
           onClick={() => onNavigate('/admin/collections')}
         />
 

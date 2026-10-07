@@ -118,13 +118,10 @@ function MainApp() {
 
       {/* Footer */}
       <footer className="bg-slate-900 border-t border-slate-800 text-slate-400 py-6 text-xs text-center">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
           <div className="flex items-center gap-2">
             <span className="font-bold text-white">Srikainari Ulsavam 2026</span>
             <span>&bull; Official Event Ledger</span>
-          </div>
-          <div className="text-slate-400">
-            Currency: <span className="text-emerald-400 font-semibold">INR (₹)</span> &bull; Indian digit grouping &bull; DECIMAL(12,2)
           </div>
         </div>
       </footer>
