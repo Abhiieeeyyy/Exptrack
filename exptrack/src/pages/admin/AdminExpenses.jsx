@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { api, EXPENSE_CATEGORIES } from '../../services/api';
-import { exportToExcel, exportToCSV } from '../../lib/csv';
+import { exportToExcel } from '../../lib/csv';
 import StatusBadge from '../../components/StatusBadge';
 import Modal from '../../components/Modal';
 import { 
   Receipt, 
   Search, 
   Filter, 
-  Download, 
   FileSpreadsheet,
   Eye, 
   ChevronLeft, 
@@ -99,11 +98,6 @@ export default function AdminExpenses() {
     );
   };
 
-  const handleExportCSV = () => {
-    const columns = getExportColumns();
-    exportToCSV(expenses, columns, `Srikainari_Ulsavam_2026_Expenses_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
-  };
-
   const allCategories = api.getExpenseCategories ? api.getExpenseCategories() : EXPENSE_CATEGORIES;
 
   return (
@@ -137,16 +131,6 @@ export default function AdminExpenses() {
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl shadow-xs transition cursor-pointer"
-            title="Export CSV with UTF-8 encoding"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>CSV</span>
           </button>
         </div>
       </div>

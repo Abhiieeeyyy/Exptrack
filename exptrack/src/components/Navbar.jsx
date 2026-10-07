@@ -95,10 +95,11 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
           </nav>
 
           {/* Right Actions & User Profile */}
-          <div className="flex items-center gap-3">
-            {/* Profile & Logout */}
-            <div className="flex items-center gap-2">
-              <div className="text-right hidden sm:block">
+          {/* Right Actions & User Profile */}
+          <div className="flex items-center gap-2">
+            {/* Desktop Profile & Logout */}
+            <div className="hidden lg:flex items-center gap-3">
+              <div className="text-right">
                 <div className="text-xs font-bold text-slate-100">{user?.full_name || user?.username}</div>
                 <div className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">
                   {isAdmin ? 'Treasurer / Admin' : 'Field Collector'}
@@ -132,11 +133,11 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-4 pt-2 pb-4 space-y-2 animate-in slide-in-from-top duration-150">
+        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-4 pt-2 pb-4 space-y-2 animate-in slide-in-from-top duration-150 shadow-xl">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <div>
               <p className="text-sm font-bold text-white">{user?.full_name || user?.username}</p>
-              <p className="text-xs text-slate-400">{user?.role === 'ADMIN' ? 'Admin Portal' : 'Member Portal'}</p>
+              <p className="text-xs text-slate-400">{user?.role === 'ADMIN' ? 'Treasurer / Admin' : 'Field Collector'}</p>
             </div>
           </div>
 
@@ -150,7 +151,7 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
                   onClick={() => handleNavClick(item.id)}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition cursor-pointer ${
                     isActive
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-semibold'
                       : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
@@ -159,6 +160,21 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
                 </button>
               );
             })}
+          </div>
+
+          {/* Mobile Logout Button in Dropdown */}
+          <div className="pt-2 mt-2 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                logout();
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-rose-400" />
+              <span>Logout</span>
+            </button>
           </div>
         </div>
       )}

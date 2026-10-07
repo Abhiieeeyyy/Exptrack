@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { api, PAYMENT_MODES } from '../../services/api';
-import { exportToExcel, exportToCSV } from '../../lib/csv';
+import { exportToExcel } from '../../lib/csv';
 import Modal from '../../components/Modal';
 import { 
   BookOpen, 
   Search, 
   Filter, 
-  Download, 
   FileSpreadsheet,
   ChevronLeft, 
   ChevronRight, 
@@ -115,11 +114,6 @@ export default function AdminCollections() {
     );
   };
 
-  const handleExportCSV = () => {
-    const columns = getExportColumns();
-    exportToCSV(collections, columns, `Srikainari_Ulsavam_2026_Collections_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
-  };
-
   const handleResetFilters = () => {
     setSearch('');
     setModeFilter('ALL');
@@ -219,16 +213,6 @@ export default function AdminCollections() {
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl shadow-xs transition cursor-pointer"
-            title="Export CSV with UTF-8 encoding"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>CSV</span>
           </button>
         </div>
       </div>
