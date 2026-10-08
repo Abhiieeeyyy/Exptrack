@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS collections (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    receipt_book_number VARCHAR(100) UNIQUE NOT NULL, -- e.g. '001-01' up to '001-50'
+    receipt_book_number VARCHAR(100) UNIQUE NOT NULL, -- e.g. '001-01' or '002-51' depending on the book's leaf range
     collected_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     donor_name VARCHAR(255) NOT NULL,
     donor_address TEXT, -- Area of collection & location

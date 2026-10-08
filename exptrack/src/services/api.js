@@ -189,10 +189,61 @@ export const api = {
   // --------------------------------------------------------------------------
   // COLLECTIONS (Income) & CONTINUOUS LEAF CALCULATOR
   // --------------------------------------------------------------------------
-  async getNextLeafForBook(bookNo) {
+  async getNextLeafForBook(bookNo, range = {}) {
     const cleanBook = parseInt(bookNo, 10) || 1;
-    const prefix = String(cleanBook).padStart(3, '0'); // e.g. "001"
+    const parsedFrom = parseInt(range.leafFrom, 10);
+    const parsedTo = parseInt(range.leafTo, 10);
+    const leafFrom = (!isNaN(parsedFrom) && parsedFrom > 0) ? parsedFrom : 1;
+    const leafTo = (!isNaN(parsedTo) && parsedTo >= leafFrom) ? parsedTo : leafFrom + 49;
+    const prefix = String(cleanBook).padStart(3, '0');
     const recordedLeaves = new Set();
+
+    const collectLeaf = (receiptNo) => {
+      if (!receiptNo) return;
+      const parts = String(receiptNo).split('-');
+      if (parts.length === 2 && parts[0] === prefix) {
+        const leafNum = parseInt(parts[1], 10);
+        if (!isNaN(leafNum) && leafNum >= leafFrom && leafNum <= leafTo) {
+          recordedLeaves.add(leafNum);
+        }
+      }
+    };
+
+    const summarize = () => {
+      const totalLeaves = leafTo - leafFrom + 1;
+      const leafArray = Array.from(recordedLeaves);
+      const formatLeaf = (n) => `${prefix}-${String(n).padStart(2, '0')}`;
+
+      if (leafArray.length === 0) {
+        return {
+          bookNo: cleanBook,
+          nextLeaf: leafFrom,
+          highestRecordedLeaf: leafFrom - 1,
+          recordedCount: 0,
+          isCompleted: false,
+          totalLeaves,
+          leafFrom,
+          leafTo,
+          formattedLeaf: formatLeaf(leafFrom)
+        };
+      }
+
+      const maxLeaf = Math.max(...leafArray);
+      const isCompleted = maxLeaf >= leafTo;
+      const nextLeaf = isCompleted ? leafTo : maxLeaf + 1;
+
+      return {
+        bookNo: cleanBook,
+        nextLeaf,
+        highestRecordedLeaf: maxLeaf,
+        recordedCount: leafArray.length,
+        isCompleted,
+        totalLeaves,
+        leafFrom,
+        leafTo,
+        formattedLeaf: formatLeaf(nextLeaf)
+      };
+    };
 
     if (isSupabaseConfigured()) {
       try {
@@ -202,44 +253,8 @@ export const api = {
           .like('receipt_book_number', `${prefix}-%`);
 
         if (!error && Array.isArray(data)) {
-          data.forEach(item => {
-            if (item.receipt_book_number) {
-              const parts = item.receipt_book_number.split('-');
-              if (parts.length === 2 && parts[0] === prefix) {
-                const leafNum = parseInt(parts[1], 10);
-                if (!isNaN(leafNum)) recordedLeaves.add(leafNum);
-              }
-            }
-          });
-
-          const leafArray = Array.from(recordedLeaves);
-          if (leafArray.length === 0) {
-            return {
-              bookNo: cleanBook,
-              nextLeaf: 1,
-              highestRecordedLeaf: 0,
-              recordedCount: 0,
-              isCompleted: false,
-              totalLeaves: 50,
-              formattedLeaf: `${prefix}-01`
-            };
-          }
-
-          const maxLeaf = Math.max(...leafArray);
-          const nextLeaf = maxLeaf + 1;
-          const isCompleted = maxLeaf >= 50;
-          const targetLeaf = isCompleted ? 50 : nextLeaf;
-          const leafStr = String(targetLeaf).padStart(2, '0');
-
-          return {
-            bookNo: cleanBook,
-            nextLeaf: targetLeaf,
-            highestRecordedLeaf: maxLeaf,
-            recordedCount: leafArray.length,
-            isCompleted: isCompleted,
-            totalLeaves: 50,
-            formattedLeaf: `${prefix}-${leafStr}`
-          };
+          data.forEach((item) => collectLeaf(item.receipt_book_number));
+          return summarize();
         }
       } catch (err) {
         console.warn('Supabase getNextLeafForBook error:', err);
@@ -247,44 +262,8 @@ export const api = {
     }
 
     const localCols = getStore('collections', INITIAL_COLLECTIONS);
-    localCols.forEach(item => {
-      if (item.receipt_book_number) {
-        const parts = item.receipt_book_number.split('-');
-        if (parts.length === 2 && parts[0] === prefix) {
-          const leafNum = parseInt(parts[1], 10);
-          if (!isNaN(leafNum)) recordedLeaves.add(leafNum);
-        }
-      }
-    });
-
-    const leafArray = Array.from(recordedLeaves);
-    if (leafArray.length === 0) {
-      return {
-        bookNo: cleanBook,
-        nextLeaf: 1,
-        highestRecordedLeaf: 0,
-        recordedCount: 0,
-        isCompleted: false,
-        totalLeaves: 50,
-        formattedLeaf: `${prefix}-01`
-      };
-    }
-
-    const maxLeaf = Math.max(...leafArray);
-    const nextLeaf = maxLeaf + 1;
-    const isCompleted = maxLeaf >= 50;
-    const targetLeaf = isCompleted ? 50 : nextLeaf;
-    const leafStr = String(targetLeaf).padStart(2, '0');
-
-    return {
-      bookNo: cleanBook,
-      nextLeaf: targetLeaf,
-      highestRecordedLeaf: maxLeaf,
-      recordedCount: leafArray.length,
-      isCompleted: isCompleted,
-      totalLeaves: 50,
-      formattedLeaf: `${prefix}-${leafStr}`
-    };
+    localCols.forEach((item) => collectLeaf(item.receipt_book_number));
+    return summarize();
   },
 
   // --------------------------------------------------------------------------

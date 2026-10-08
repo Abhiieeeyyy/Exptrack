@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import { formatINR } from '../../lib/money';
 
-// Helper to format 001-01 up to 001-50
 export const formatReceiptLeaf = (bookNo, leafNo) => {
   const cleanBook = parseInt(bookNo, 10) || 1;
   const cleanLeaf = parseInt(leafNo, 10) || 1;
@@ -31,6 +30,26 @@ export const formatReceiptLeaf = (bookNo, leafNo) => {
   const leafStr = String(cleanLeaf).padStart(2, '0');
   return `${bookStr}-${leafStr}`;
 };
+
+const parseLeafRange = (fromStr, toStr) => {
+  const leafFrom = parseInt(fromStr, 10);
+  const leafTo = parseInt(toStr, 10);
+  if (!fromStr || isNaN(leafFrom) || leafFrom <= 0) {
+    return { error: 'Enter a valid starting leaf number (e.g. 1, 51, 101)' };
+  }
+  if (!toStr || isNaN(leafTo) || leafTo <= 0) {
+    return { error: 'Enter a valid ending leaf number (e.g. 50, 100, 150)' };
+  }
+  if (leafTo < leafFrom) {
+    return { error: 'Ending leaf must be greater than or equal to the starting leaf' };
+  }
+  return { leafFrom, leafTo, totalLeaves: leafTo - leafFrom + 1 };
+};
+
+const sessionRange = (session) => ({
+  leafFrom: session?.leafFrom,
+  leafTo: session?.leafTo
+});
 
 export default function RecordCollection({ onCollectionAdded }) {
   const { user } = useAuth();
@@ -42,7 +61,12 @@ export default function RecordCollection({ onCollectionAdded }) {
       const saved = localStorage.getItem(sessionKey);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.bookNo && parsed.currentLeaf <= 50) {
+        if (parsed.bookNo) {
+          if (!parsed.leafFrom || !parsed.leafTo) {
+            parsed.leafFrom = 1;
+            parsed.leafTo = 50;
+            parsed.totalLeaves = 50;
+          }
           return parsed;
         }
       }
@@ -55,6 +79,8 @@ export default function RecordCollection({ onCollectionAdded }) {
   // Modal for setting/changing Book & Area
   const [sessionModalOpen, setSessionModalOpen] = useState(!bookSession);
   const [inputBookNo, setInputBookNo] = useState('');
+  const [inputLeafFrom, setInputLeafFrom] = useState('1');
+  const [inputLeafTo, setInputLeafTo] = useState('50');
   const [inputArea, setInputArea] = useState('');
   const [sessionError, setSessionError] = useState('');
   const [bookCompletedModal, setBookCompletedModal] = useState(false);
@@ -86,13 +112,15 @@ export default function RecordCollection({ onCollectionAdded }) {
       }
 
       try {
-        const leafInfo = await api.getNextLeafForBook(bookSession.bookNo);
+        const leafInfo = await api.getNextLeafForBook(bookSession.bookNo, sessionRange(bookSession));
         if (!isMounted) return;
 
         if (leafInfo.isCompleted) {
           setCompletedBookInfo({
             bookNo: bookSession.bookNo,
-            area: bookSession.area
+            area: bookSession.area,
+            leafFrom: bookSession.leafFrom,
+            leafTo: bookSession.leafTo
           });
           setBookCompletedModal(true);
           return;
@@ -124,7 +152,7 @@ export default function RecordCollection({ onCollectionAdded }) {
     syncContinuousBookLeaf();
 
     return () => { isMounted = false; };
-  }, [bookSession?.bookNo]);
+  }, [bookSession?.bookNo, bookSession?.leafFrom, bookSession?.leafTo]);
 
   // Handle saving Book & Area configuration with continuous leaf check
   const handleSaveBookSession = async (e) => {
@@ -139,11 +167,21 @@ export default function RecordCollection({ onCollectionAdded }) {
       return;
     }
 
+    const range = parseLeafRange(inputLeafFrom, inputLeafTo);
+    if (range.error) {
+      setSessionError(range.error);
+      return;
+    }
+
     try {
-      // Check database/ledger for the latest recorded leaf in this book
-      const leafInfo = await api.getNextLeafForBook(cleanBook);
+      const leafInfo = await api.getNextLeafForBook(cleanBook, {
+        leafFrom: range.leafFrom,
+        leafTo: range.leafTo
+      });
       if (leafInfo.isCompleted) {
-        setSessionError(`Book #${String(cleanBook).padStart(3, '0')} has already completed all 50 leaves (100% recorded). Please choose another Book Number.`);
+        setSessionError(
+          `Book #${String(cleanBook).padStart(3, '0')} already has all leaves ${range.leafFrom}–${range.leafTo} recorded. Choose another book or a different leaf range.`
+        );
         return;
       }
 
@@ -151,7 +189,9 @@ export default function RecordCollection({ onCollectionAdded }) {
         bookNo: cleanBook,
         area: inputArea.trim(),
         currentLeaf: leafInfo.nextLeaf,
-        totalLeaves: 50
+        leafFrom: range.leafFrom,
+        leafTo: range.leafTo,
+        totalLeaves: range.totalLeaves
       };
 
       localStorage.setItem(sessionKey, JSON.stringify(newSession));
@@ -169,9 +209,13 @@ export default function RecordCollection({ onCollectionAdded }) {
   const handleOpenEditSession = () => {
     if (bookSession) {
       setInputBookNo(String(bookSession.bookNo));
+      setInputLeafFrom(String(bookSession.leafFrom || 1));
+      setInputLeafTo(String(bookSession.leafTo || 50));
       setInputArea(bookSession.area || '');
     } else {
       setInputBookNo('1');
+      setInputLeafFrom('1');
+      setInputLeafTo('50');
       setInputArea('');
     }
     setSessionError('');
@@ -206,15 +250,20 @@ export default function RecordCollection({ onCollectionAdded }) {
       const currentArea = bookSession.area;
 
       // Verify the latest continuous leaf right before recording
-      const latestLeafInfo = await api.getNextLeafForBook(currentBookNo);
+      const latestLeafInfo = await api.getNextLeafForBook(currentBookNo, sessionRange(bookSession));
       if (latestLeafInfo.isCompleted) {
+        const rangeSize = (bookSession.leafTo || 50) - (bookSession.leafFrom || 1) + 1;
         setCompletedBookInfo({
           bookNo: currentBookNo,
-          area: currentArea
+          area: currentArea,
+          leafFrom: bookSession.leafFrom,
+          leafTo: bookSession.leafTo
         });
         localStorage.removeItem(sessionKey);
         setBookSession(null);
         setInputBookNo(String(currentBookNo + 1));
+        setInputLeafFrom(String((bookSession.leafTo || 50) + 1));
+        setInputLeafTo(String((bookSession.leafTo || 50) + rangeSize));
         setInputArea(currentArea);
         setBookCompletedModal(true);
         setSaving(false);
@@ -257,17 +306,21 @@ export default function RecordCollection({ onCollectionAdded }) {
       setNotes('');
 
       // Query the next available leaf in this book
-      const nextLeafInfo = await api.getNextLeafForBook(currentBookNo);
+      const nextLeafInfo = await api.getNextLeafForBook(currentBookNo, sessionRange(bookSession));
 
       if (nextLeafInfo.isCompleted) {
-        // Book is fully recorded (50/50 leaves)
+        const rangeSize = (bookSession.leafTo || 50) - (bookSession.leafFrom || 1) + 1;
         setCompletedBookInfo({
           bookNo: currentBookNo,
-          area: currentArea
+          area: currentArea,
+          leafFrom: bookSession.leafFrom,
+          leafTo: bookSession.leafTo
         });
         localStorage.removeItem(sessionKey);
         setBookSession(null);
         setInputBookNo(String(currentBookNo + 1));
+        setInputLeafFrom(String((bookSession.leafTo || 50) + 1));
+        setInputLeafTo(String((bookSession.leafTo || 50) + rangeSize));
         setInputArea(currentArea);
         setBookCompletedModal(true);
       } else {
@@ -292,6 +345,22 @@ export default function RecordCollection({ onCollectionAdded }) {
       setSaving(false);
     }
   };
+
+  const leafFrom = bookSession?.leafFrom || 1;
+  const leafTo = bookSession?.leafTo || 50;
+  const totalLeaves = bookSession?.totalLeaves || (leafTo - leafFrom + 1);
+  const completedLeaves = bookSession
+    ? Math.max(0, Math.min(totalLeaves, bookSession.currentLeaf - leafFrom))
+    : 0;
+  const rangePreviewBook = parseInt(inputBookNo, 10);
+  const rangePreviewFrom = parseInt(inputLeafFrom, 10);
+  const rangePreviewTo = parseInt(inputLeafTo, 10);
+  const rangePreviewValid =
+    !isNaN(rangePreviewBook) &&
+    rangePreviewBook > 0 &&
+    !isNaN(rangePreviewFrom) &&
+    !isNaN(rangePreviewTo) &&
+    rangePreviewTo >= rangePreviewFrom;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -332,7 +401,7 @@ export default function RecordCollection({ onCollectionAdded }) {
                 </span>
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/60 text-emerald-200 border border-emerald-700">
                   <Layers className="w-3 h-3 text-emerald-300" />
-                  Leaf {bookSession.currentLeaf} of 50
+                  Leaf {bookSession.currentLeaf} of {leafFrom}–{leafTo}
                 </span>
               </div>
               <p className="text-xs text-slate-300 font-mono">
@@ -347,21 +416,20 @@ export default function RecordCollection({ onCollectionAdded }) {
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition cursor-pointer"
               >
                 <Settings className="w-3.5 h-3.5 text-slate-400" />
-                <span>Change Book / Area</span>
+                <span>Change Book / Range</span>
               </button>
             </div>
           </div>
 
-          {/* Progress Bar (Leaves 1 to 50) */}
           <div className="mt-3.5 pt-3 border-t border-slate-800/80">
             <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1 font-medium">
-              <span>Book Progress ({bookSession.currentLeaf - 1}/50 Leaves Completed)</span>
-              <span>{Math.round(((bookSession.currentLeaf - 1) / 50) * 100)}%</span>
+              <span>Book Progress ({completedLeaves}/{totalLeaves} leaves completed)</span>
+              <span>{Math.round((completedLeaves / totalLeaves) * 100)}%</span>
             </div>
             <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
               <div 
                 className="bg-gradient-to-r from-emerald-500 to-teal-400 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${Math.max(4, ((bookSession.currentLeaf - 1) / 50) * 100)}%` }}
+                style={{ width: `${Math.max(4, (completedLeaves / totalLeaves) * 100)}%` }}
               />
             </div>
           </div>
@@ -433,7 +501,7 @@ export default function RecordCollection({ onCollectionAdded }) {
                 value={receiptNumber}
                 readOnly={Boolean(bookSession)}
                 onChange={(e) => setReceiptNumber(e.target.value.toUpperCase())}
-                placeholder="e.g. 001-01"
+                placeholder="e.g. 001-01 or 002-51"
                 className={`w-full rounded-lg border px-3.5 py-2.5 text-sm font-mono font-bold tracking-wide transition focus:outline-none focus:ring-2 ${
                   bookSession 
                     ? 'bg-slate-50 border-emerald-300 text-emerald-900 cursor-not-allowed font-extrabold'
@@ -443,7 +511,7 @@ export default function RecordCollection({ onCollectionAdded }) {
                 }`}
               />
               <span className="absolute right-3 top-2.5 text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
-                Auto #{bookSession ? `Leaf ${bookSession.currentLeaf}/50` : 'Unique'}
+                Auto #{bookSession ? `Leaf ${bookSession.currentLeaf} (${leafFrom}–${leafTo})` : 'Unique'}
               </span>
             </div>
             {errors.receiptNumber ? (
@@ -451,7 +519,7 @@ export default function RecordCollection({ onCollectionAdded }) {
             ) : (
               <p className="text-[11px] text-slate-400 mt-1">
                 {bookSession 
-                  ? `Incrementing automatically for Book #${String(bookSession.bookNo).padStart(3, '0')}`
+                  ? `Auto leaf ${leafFrom}–${leafTo} for Book #${String(bookSession.bookNo).padStart(3, '0')}`
                   : 'Receipt leaf numbers cannot be duplicated.'}
               </p>
             )}
@@ -667,7 +735,7 @@ export default function RecordCollection({ onCollectionAdded }) {
           if (bookSession) setSessionModalOpen(false);
         }}
         title="Field Collector Book Setup"
-        subtitle="Specify the receipt book number and collection area for auto leaf numbering (001-01 to 001-50)."
+        subtitle="Enter the book number and the leaf numbers printed in that book (Book 1 may be 1–50, Book 2 may be 51–100)."
         maxWidth="max-w-md"
       >
         <form onSubmit={handleSaveBookSession} className="space-y-4">
@@ -694,10 +762,43 @@ export default function RecordCollection({ onCollectionAdded }) {
                 autoFocus
               />
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Entering Book <strong>1</strong> will generate leaves <strong>001-01</strong> up to <strong>001-50</strong>.
-            </p>
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Leaf From <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={inputLeafFrom}
+                onChange={(e) => setInputLeafFrom(e.target.value)}
+                placeholder="e.g. 1"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-mono font-bold text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Leaf To <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={inputLeafTo}
+                onChange={(e) => setInputLeafTo(e.target.value)}
+                placeholder="e.g. 50"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-mono font-bold text-slate-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 focus:outline-none"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500 -mt-2">
+            {rangePreviewValid
+              ? `This book will auto-number ${formatReceiptLeaf(rangePreviewBook, rangePreviewFrom)} through ${formatReceiptLeaf(rangePreviewBook, rangePreviewTo)}.`
+              : 'Example: Book 1 with 1–50, then Book 2 with 51–100.'}
+          </p>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
@@ -735,12 +836,11 @@ export default function RecordCollection({ onCollectionAdded }) {
         </form>
       </Modal>
 
-      {/* Book Completed Modal (After leaf 50 is saved) */}
       <Modal
         isOpen={bookCompletedModal}
         onClose={() => {}}
-        title="🎉 Book Completed (50/50 Leaves)"
-        subtitle="You have successfully recorded all 50 receipt leaves for this book."
+        title="🎉 Book Completed"
+        subtitle="All leaves in this book's range have been recorded."
         maxWidth="max-w-md"
       >
         <div className="space-y-4">
@@ -752,12 +852,12 @@ export default function RecordCollection({ onCollectionAdded }) {
               Book #{completedBookInfo ? String(completedBookInfo.bookNo).padStart(3, '0') : ''} Complete!
             </p>
             <p className="text-xs text-emerald-700">
-              Leaves {completedBookInfo ? formatReceiptLeaf(completedBookInfo.bookNo, 1) : ''} to {completedBookInfo ? formatReceiptLeaf(completedBookInfo.bookNo, 50) : ''} are recorded.
+              Leaves {completedBookInfo ? formatReceiptLeaf(completedBookInfo.bookNo, completedBookInfo.leafFrom || 1) : ''} to {completedBookInfo ? formatReceiptLeaf(completedBookInfo.bookNo, completedBookInfo.leafTo || 50) : ''} are recorded.
             </p>
           </div>
 
           <p className="text-xs text-slate-600">
-            Please specify the <strong>Next Book Number</strong> and <strong>Area</strong> to proceed with the next batch of collections.
+            Enter the <strong>next book number</strong> and that book&apos;s <strong>leaf range</strong> (for example 51–100).
           </p>
 
           <form onSubmit={handleSaveBookSession} className="space-y-3">
@@ -776,6 +876,42 @@ export default function RecordCollection({ onCollectionAdded }) {
                 autoFocus
               />
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Leaf From <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={inputLeafFrom}
+                  onChange={(e) => setInputLeafFrom(e.target.value)}
+                  placeholder="e.g. 51"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-mono font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Leaf To <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={inputLeafTo}
+                  onChange={(e) => setInputLeafTo(e.target.value)}
+                  placeholder="e.g. 100"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-mono font-bold text-slate-900 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            {rangePreviewValid && (
+              <p className="text-[11px] text-slate-500">
+                Next receipts: {formatReceiptLeaf(rangePreviewBook, rangePreviewFrom)} through {formatReceiptLeaf(rangePreviewBook, rangePreviewTo)}.
+              </p>
+            )}
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
