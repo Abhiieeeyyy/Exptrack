@@ -59,24 +59,22 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
-### Option C: Instant Offline Demo Mode
-If Supabase credentials are not provided, the app automatically runs in localized offline demo mode with sample collections, expenses, and demo users.
+### Option C: Instant Offline Mode
+If Supabase credentials are not provided, the app runs locally with an empty ledger and the admin account only.
 
 ---
 
-## 🔑 Demo Logins
+## 🔑 Admin Login
 
 | Role | Username | Password | Notes |
 | :--- | :--- | :--- | :--- |
-| **Treasurer / Admin** | `admin` | `password123` | Full access to KPIs, approvals queue, user roster, and CSV exports |
-| **Field Member 1** | `amit` | `password123` | Field lead with collection records and submitted bills |
-| **Field Member 2** | `priya` | `password123` | Volunteer collector |
+| **Treasurer / Admin** | `admin` | `Admin@skat369` | Full access. Create field members from the Users screen after login. |
 
 ---
 
 ## 📜 Routes
 
-- `/login` — Authentication & 1-click demo login
+- `/login` — Authentication
 - `/member/record` — Record collection receipt
 - `/member/upload` — Submit expense bill
 - `/member/history` — Personal collections & bill status

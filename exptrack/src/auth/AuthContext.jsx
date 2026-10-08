@@ -7,7 +7,13 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
       const saved = localStorage.getItem('fecms_session_user');
-      return saved ? JSON.parse(saved) : null;
+      const parsed = saved ? JSON.parse(saved) : null;
+      const seededUsernames = ['amit', 'priya', 'rahul'];
+      if (parsed && seededUsernames.includes(String(parsed.username || '').toLowerCase())) {
+        localStorage.removeItem('fecms_session_user');
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -33,18 +39,6 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const loginAsDemo = async (role = 'ADMIN') => {
-    setLoading(true);
-    try {
-      const username = role === 'ADMIN' ? 'admin' : 'amit';
-      const userData = await api.login(username, 'password123');
-      setUser(userData);
-      return userData;
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const logout = () => {
     setUser(null);
     localStorage.removeItem('fecms_session_user');
@@ -59,7 +53,6 @@ export function AuthProvider({ children }) {
         isMember: user?.role === 'USER',
         loading,
         login,
-        loginAsDemo,
         logout,
         setUser
       }}

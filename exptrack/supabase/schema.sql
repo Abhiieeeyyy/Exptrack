@@ -107,15 +107,10 @@ ALTER TABLE expenses DISABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "Enable all operations for expenses" ON expenses FOR ALL TO public USING (true) WITH CHECK (true);
 
 -- ------------------------------------------------------------------------------
--- 6. SEED DATA (Demo Admin & Field Members)
+-- 6. ADMIN ACCOUNT ONLY (no demo members, collections, or bills)
 -- ------------------------------------------------------------------------------
--- Passwords below match demo passkeys/passwords ('admin123' and 'member123')
 INSERT INTO users (id, username, password_hash, full_name, role, phone)
-VALUES 
-    ('a0000000-0000-0000-0000-000000000001', 'admin', 'Admin@skat369', 'Rajesh Sharma', 'ADMIN', '+91 98765 43210'),
-    ('b0000000-0000-0000-0000-000000000002', 'amit', 'member123', 'Amit Patel', 'USER', '+91 98765 43211'),
-    ('c0000000-0000-0000-0000-000000000003', 'priya', 'member123', 'Priya Verma', 'USER', '+91 98765 43212')
+VALUES
+    ('a0000000-0000-0000-0000-000000000001', 'admin', 'Admin@skat369', 'Administrator', 'ADMIN', '')
 ON CONFLICT (username) DO NOTHING;
-
--- Note: Collections are left clean and unseeded so Book #001 Leaf 001-01 starts fresh.
 

@@ -1,195 +1,23 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-// Initial Mock / Seed Data
+const LOCAL_DATA_VERSION = '3';
+
 const INITIAL_USERS = [
   {
     id: 'u-admin-1',
     username: 'admin',
     password: 'Admin@skat369',
-    full_name: 'Rajesh Sharma',
+    password_hash: 'Admin@skat369',
+    full_name: 'Administrator',
     role: 'ADMIN',
-    phone: '+91 98765 43210',
-    created_at: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'u-member-1',
-    username: 'amit',
-    password: 'password123',
-    full_name: 'Amit Patel',
-    role: 'USER',
-    phone: '+91 98765 43211',
-    created_at: new Date(Date.now() - 25 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'u-member-2',
-    username: 'priya',
-    password: 'password123',
-    full_name: 'Priya Verma',
-    role: 'USER',
-    phone: '+91 98765 43212',
-    created_at: new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'u-member-3',
-    username: 'rahul',
-    password: 'password123',
-    full_name: 'Rahul Deshmukh',
-    role: 'USER',
-    phone: '+91 98765 43213',
-    created_at: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString(),
+    phone: '',
+    created_at: new Date().toISOString(),
   }
 ];
 
-const INITIAL_COLLECTIONS = [
-  {
-    id: 'col-1',
-    receipt_book_number: 'REC-2026-001',
-    collected_by_user_id: 'u-member-1',
-    collector_name: 'Amit Patel',
-    donor_name: 'Sunil Narang & Sons',
-    donor_address: 'Shop 12, Main Market, MG Road',
-    donor_phone: '+91 98234 11223',
-    amount: 25000,
-    payment_mode: 'UPI',
-    reference_number: 'UPI/260982347182',
-    notes: 'Annual festival diamond sponsor',
-    created_at: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'col-2',
-    receipt_book_number: 'REC-2026-002',
-    collected_by_user_id: 'u-member-1',
-    collector_name: 'Amit Patel',
-    donor_name: 'Kavita Sundaram',
-    donor_address: 'Flat 402, Green Park Residency',
-    donor_phone: '+91 98450 33445',
-    amount: 10000,
-    payment_mode: 'CASH',
-    reference_number: '',
-    notes: 'Cash received at residency desk',
-    created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'col-3',
-    receipt_book_number: 'REC-2026-003',
-    collected_by_user_id: 'u-member-2',
-    collector_name: 'Priya Verma',
-    donor_name: 'Apex Industrial Solutions',
-    donor_address: 'Plot 45, MIDC Phase 2',
-    donor_phone: '+91 98111 88990',
-    amount: 50000,
-    payment_mode: 'BANK_TRANSFER',
-    reference_number: 'NEFT-HDFC000123984',
-    notes: 'Corporate sponsorship wire transfer',
-    created_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'col-4',
-    receipt_book_number: 'REC-2026-004',
-    collected_by_user_id: 'u-member-3',
-    collector_name: 'Rahul Deshmukh',
-    donor_name: 'Dr. Ramesh Chandra',
-    donor_address: 'Clinic 5, South Extension',
-    donor_phone: '+91 98712 99001',
-    amount: 5000,
-    payment_mode: 'CHEQUE',
-    reference_number: 'CHQ-882104 (SBI)',
-    notes: 'Cheque cleared in bank account',
-    created_at: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'col-5',
-    receipt_book_number: 'REC-2026-005',
-    collected_by_user_id: 'u-member-2',
-    collector_name: 'Priya Verma',
-    donor_name: 'Shree Balaji Traders',
-    donor_address: 'Market Yard Gate 2',
-    donor_phone: '+91 97654 32109',
-    amount: 15000,
-    payment_mode: 'UPI',
-    reference_number: 'UPI/261048392019',
-    notes: 'Banner advertisement sponsorship',
-    created_at: new Date(Date.now() - 8 * 3600 * 1000).toISOString(),
-  }
-];
-
-const INITIAL_EXPENSES = [
-  {
-    id: 'exp-1',
-    submitted_by_user_id: 'u-member-1',
-    submitter_name: 'Amit Patel',
-    category: 'Stage & Lighting',
-    amount: 18500,
-    description: 'Truss setup, LED par lights and heavy-duty halogen spotlights for main stage',
-    bill_image_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop',
-    status: 'APPROVED',
-    rejection_reason: null,
-    reviewed_by: 'u-admin-1',
-    reviewer_name: 'Rajesh Sharma',
-    reviewed_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-    created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'exp-2',
-    submitted_by_user_id: 'u-member-1',
-    submitter_name: 'Amit Patel',
-    category: 'Sound System',
-    amount: 12000,
-    description: 'JBL 4-top Line Array speakers, digital mixer, and 4 wireless handheld mics',
-    bill_image_url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&auto=format&fit=crop',
-    status: 'APPROVED',
-    rejection_reason: null,
-    reviewed_by: 'u-admin-1',
-    reviewer_name: 'Rajesh Sharma',
-    reviewed_at: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
-    created_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'exp-3',
-    submitted_by_user_id: 'u-member-2',
-    submitter_name: 'Priya Verma',
-    category: 'Catering & Food',
-    amount: 15400,
-    description: 'Lunch thali boxes, drinking water cans, and evening high-tea for 85 volunteers',
-    bill_image_url: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop',
-    status: 'PENDING',
-    rejection_reason: null,
-    reviewed_by: null,
-    reviewer_name: null,
-    reviewed_at: null,
-    created_at: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'exp-4',
-    submitted_by_user_id: 'u-member-1',
-    submitter_name: 'Amit Patel',
-    category: 'Printing & Banners',
-    amount: 4200,
-    description: '25 Heavy Vinyl Standees, 1000 invitation leaflets and badges with lanyards',
-    bill_image_url: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=800&auto=format&fit=crop',
-    status: 'PENDING',
-    rejection_reason: null,
-    reviewed_by: null,
-    reviewer_name: null,
-    reviewed_at: null,
-    created_at: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'exp-5',
-    submitted_by_user_id: 'u-member-3',
-    submitter_name: 'Rahul Deshmukh',
-    category: 'Transport & Logistics',
-    amount: 3500,
-    description: 'Tempo rental for transporting sound equipment & chairs across 3 venues',
-    bill_image_url: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop',
-    status: 'REJECTED',
-    rejection_reason: 'Bill invoice missing GST / vendor rubber stamp. Please ask driver for official receipt.',
-    reviewed_by: 'u-admin-1',
-    reviewer_name: 'Rajesh Sharma',
-    reviewed_at: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
-    created_at: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
-  }
-];
+const INITIAL_COLLECTIONS = [];
+const INITIAL_EXPENSES = [];
+const SEEDED_MEMBER_USERNAMES = ['amit', 'priya', 'rahul'];
 
 // LocalStorage helpers for offline demo mode
 const getStore = (key, initial) => {
@@ -212,6 +40,57 @@ const setStore = (key, data) => {
     console.warn('LocalStorage quota or serialization error:', err);
   }
 };
+
+function resetLocalStoresToAdminOnly() {
+  localStorage.removeItem('fecms_collections');
+  localStorage.removeItem('fecms_expenses');
+  localStorage.removeItem('fecms_users');
+  localStorage.removeItem('fecms_custom_categories');
+  setStore('users', INITIAL_USERS);
+  setStore('collections', []);
+  setStore('expenses', []);
+}
+
+function purgeStaleLocalData() {
+  try {
+    if (localStorage.getItem('fecms_data_version') === LOCAL_DATA_VERSION) return;
+    resetLocalStoresToAdminOnly();
+    localStorage.setItem('fecms_data_version', LOCAL_DATA_VERSION);
+  } catch (err) {
+    console.warn('Could not purge stale local demo data:', err);
+  }
+}
+
+purgeStaleLocalData();
+
+async function purgeSeededRemoteUsers() {
+  if (!isSupabaseConfigured() || !supabase) return;
+  try {
+    const { data: seedUsers, error } = await supabase
+      .from('users')
+      .select('id, username, role')
+      .in('username', SEEDED_MEMBER_USERNAMES);
+
+    if (error || !seedUsers?.length) return;
+
+    const ids = seedUsers.map((u) => u.id);
+    await supabase.from('expenses').delete().in('submitted_by_user_id', ids);
+    await supabase.from('collections').delete().in('collected_by_user_id', ids);
+    await supabase.from('users').delete().in('id', ids);
+  } catch (err) {
+    console.warn('Could not purge seeded remote users:', err);
+  }
+}
+
+let remoteSeedPurgePromise = null;
+function ensureRemoteSeedPurge() {
+  if (!remoteSeedPurgePromise) {
+    remoteSeedPurgePromise = purgeSeededRemoteUsers();
+  }
+  return remoteSeedPurgePromise;
+}
+
+ensureRemoteSeedPurge();
 
 // Available Expense Categories
 export const EXPENSE_CATEGORIES = [
@@ -246,6 +125,8 @@ export const api = {
     const cleanUser = username.trim().toLowerCase();
     const cleanPass = password.trim();
 
+    await ensureRemoteSeedPurge();
+
     // 1. Check Supabase if configured
     if (isSupabaseConfigured()) {
       try {
@@ -255,39 +136,24 @@ export const api = {
           .eq('username', cleanUser)
           .maybeSingle();
 
-        if (!error && data) {
+        if (error) throw error;
+
+        if (data) {
           const dbHash = data.password_hash || data.password || '';
-          const isDirectMatch = dbHash === cleanPass;
-
-          // Check if updated in local store as well
-          const localUsers = getStore('users', INITIAL_USERS);
-          const localUser = localUsers.find(u => u.username.toLowerCase() === cleanUser);
-          const isLocalMatch = localUser && (
-            localUser.password === cleanPass ||
-            localUser.password_hash === cleanPass
-          );
-
-          if (isDirectMatch || isLocalMatch) {
-            // Synchronize into local store
-            const lIdx = localUsers.findIndex(u => u.username.toLowerCase() === cleanUser);
-            if (lIdx !== -1) {
-              localUsers[lIdx] = { ...localUsers[lIdx], ...data, password: cleanPass, password_hash: cleanPass };
-            } else {
-              localUsers.unshift({ ...data, password: cleanPass, password_hash: cleanPass });
-            }
-            setStore('users', localUsers);
-
-            return {
-              id: data.id,
-              username: data.username,
-              full_name: data.full_name || data.username,
-              role: data.role,
-              phone: data.phone
-            };
-          } else {
+          if (dbHash !== cleanPass) {
             throw new Error('Invalid username or password');
           }
+
+          return {
+            id: data.id,
+            username: data.username,
+            full_name: data.full_name || data.username,
+            role: data.role,
+            phone: data.phone
+          };
         }
+
+        throw new Error('Invalid username or password');
       } catch (err) {
         if (err.message === 'Invalid username or password') {
           throw err;
@@ -345,13 +211,41 @@ export const api = {
               }
             }
           });
+
+          const leafArray = Array.from(recordedLeaves);
+          if (leafArray.length === 0) {
+            return {
+              bookNo: cleanBook,
+              nextLeaf: 1,
+              highestRecordedLeaf: 0,
+              recordedCount: 0,
+              isCompleted: false,
+              totalLeaves: 50,
+              formattedLeaf: `${prefix}-01`
+            };
+          }
+
+          const maxLeaf = Math.max(...leafArray);
+          const nextLeaf = maxLeaf + 1;
+          const isCompleted = maxLeaf >= 50;
+          const targetLeaf = isCompleted ? 50 : nextLeaf;
+          const leafStr = String(targetLeaf).padStart(2, '0');
+
+          return {
+            bookNo: cleanBook,
+            nextLeaf: targetLeaf,
+            highestRecordedLeaf: maxLeaf,
+            recordedCount: leafArray.length,
+            isCompleted: isCompleted,
+            totalLeaves: 50,
+            formattedLeaf: `${prefix}-${leafStr}`
+          };
         }
       } catch (err) {
         console.warn('Supabase getNextLeafForBook error:', err);
       }
     }
 
-    // Also check local store
     const localCols = getStore('collections', INITIAL_COLLECTIONS);
     localCols.forEach(item => {
       if (item.receipt_book_number) {
@@ -507,7 +401,9 @@ export const api = {
   },
 
   async getCollections({ search = '', mode = '', status = '', memberId = '', dateFrom = '', dateTo = '' } = {}) {
+    await ensureRemoteSeedPurge();
     let result = [];
+    let usedSupabase = false;
 
     if (isSupabaseConfigured()) {
       try {
@@ -527,7 +423,8 @@ export const api = {
         }
 
         const { data, error } = await query;
-        if (!error && data) {
+        if (!error && Array.isArray(data)) {
+          usedSupabase = true;
           result = data.map(item => {
             const isPending = (item.notes && item.notes.includes('[PAYMENT_PENDING]')) || item.payment_status === 'PENDING';
             const cleanNotes = (item.notes || '').replace(/\[PAYMENT_PENDING\]/g, '').trim();
@@ -544,8 +441,7 @@ export const api = {
       }
     }
 
-    if (result.length === 0) {
-      // Local fallback
+    if (!usedSupabase) {
       let collections = getStore('collections', INITIAL_COLLECTIONS);
       
       if (memberId) {
@@ -839,6 +735,7 @@ export const api = {
   },
 
   async getExpenses({ category = '', status = '', memberId = '', search = '' } = {}) {
+    await ensureRemoteSeedPurge();
     if (isSupabaseConfigured()) {
       try {
         let query = supabase.from('expenses').select(`
@@ -1036,6 +933,7 @@ export const api = {
   // USER ROSTER & MANAGEMENT
   // --------------------------------------------------------------------------
   async getUsers() {
+    await ensureRemoteSeedPurge();
     const localUsers = getStore('users', INITIAL_USERS);
     if (isSupabaseConfigured()) {
       try {
@@ -1045,30 +943,8 @@ export const api = {
           .order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data)) {
-          // Merge: Map by username (lowercase)
-          const mergedMap = new Map();
-          // Start with local users
-          localUsers.forEach(u => {
-            if (u && u.username) mergedMap.set(u.username.toLowerCase(), u);
-          });
-          // Overlay Supabase users
-          data.forEach(su => {
-            if (!su || !su.username) return;
-            const uname = su.username.toLowerCase();
-            const existingLocal = mergedMap.get(uname);
-            mergedMap.set(uname, {
-              ...su,
-              full_name: (existingLocal?.full_name && existingLocal?.full_name !== existingLocal?.username) 
-                ? existingLocal.full_name 
-                : (su.full_name || su.username),
-              phone: existingLocal?.phone || su.phone || '',
-              role: existingLocal?.role || su.role || 'USER',
-              password: existingLocal?.password
-            });
-          });
-          const merged = Array.from(mergedMap.values());
-          setStore('users', merged);
-          return merged;
+          setStore('users', data);
+          return data;
         }
       } catch (err) {
         console.warn('Supabase getUsers error:', err);
@@ -1250,13 +1126,8 @@ export const api = {
     });
   },
 
-  // Reset demo store back to fresh state
   resetDemoData() {
-    localStorage.removeItem('fecms_collections');
-    localStorage.removeItem('fecms_expenses');
-    localStorage.removeItem('fecms_users');
-    setStore('users', INITIAL_USERS);
-    setStore('collections', INITIAL_COLLECTIONS);
-    setStore('expenses', INITIAL_EXPENSES);
+    resetLocalStoresToAdminOnly();
+    localStorage.setItem('fecms_data_version', LOCAL_DATA_VERSION);
   }
 };
