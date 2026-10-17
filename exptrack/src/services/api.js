@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 
 const LOCAL_DATA_VERSION = '3';
 
@@ -15,19 +15,57 @@ const INITIAL_USERS = [
   }
 ];
 
+export const normalizeUser = (u) => {
+  if (!u) return null;
+  const rawRole = (u.role || '').toUpperCase();
+  const rawPhone = u.phone || '';
+  const isFinance = rawRole === 'FINANCE' || rawPhone.includes('[ROLE:FINANCE]');
+  const isAdmin = rawRole === 'ADMIN';
+
+  let role = 'COLLECTOR';
+  if (isAdmin) role = 'ADMIN';
+  else if (isFinance) role = 'FINANCE';
+
+  const cleanPhone = rawPhone.replace(/\[ROLE:.*?\]/g, '').trim();
+
+  return {
+    ...u,
+    role,
+    phone: cleanPhone,
+    isFinance,
+    isAdmin,
+    isCollector: !isAdmin && !isFinance
+  };
+};
+
+export const encodeRoleInPhone = (phone, role) => {
+  const clean = (phone || '').replace(/\[ROLE:.*?\]/g, '').trim();
+  if (role === 'FINANCE') {
+    return clean ? `${clean} [ROLE:FINANCE]` : '[ROLE:FINANCE]';
+  }
+  return clean;
+};
+
 const INITIAL_COLLECTIONS = [];
 const INITIAL_EXPENSES = [];
 const SEEDED_MEMBER_USERNAMES = ['amit', 'priya', 'rahul'];
 
-// LocalStorage helpers for offline demo mode
+const memoryStore = {};
+// Storage helpers (LocalStorage in browser, in-memory fallback in SSR/Node)
 const getStore = (key, initial) => {
   try {
-    const raw = localStorage.getItem(`fecms_${key}`);
-    if (!raw) {
-      localStorage.setItem(`fecms_${key}`, JSON.stringify(initial));
-      return initial;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`fecms_${key}`);
+      if (!raw) {
+        localStorage.setItem(`fecms_${key}`, JSON.stringify(initial));
+        return initial;
+      }
+      return JSON.parse(raw);
     }
-    return JSON.parse(raw);
+    if (!(key in memoryStore)) {
+      memoryStore[key] = initial;
+    }
+    return memoryStore[key];
   } catch {
     return initial;
   }
@@ -35,24 +73,33 @@ const getStore = (key, initial) => {
 
 const setStore = (key, data) => {
   try {
-    localStorage.setItem(`fecms_${key}`, JSON.stringify(data));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`fecms_${key}`, JSON.stringify(data));
+    } else {
+      memoryStore[key] = data;
+    }
   } catch (err) {
-    console.warn('LocalStorage quota or serialization error:', err);
+    console.warn('Storage quota or serialization error:', err);
   }
 };
 
 function resetLocalStoresToAdminOnly() {
-  localStorage.removeItem('fecms_collections');
-  localStorage.removeItem('fecms_expenses');
-  localStorage.removeItem('fecms_users');
-  localStorage.removeItem('fecms_custom_categories');
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('fecms_collections');
+    localStorage.removeItem('fecms_expenses');
+    localStorage.removeItem('fecms_users');
+    localStorage.removeItem('fecms_custom_categories');
+    localStorage.removeItem('fecms_finance_credits');
+  }
   setStore('users', INITIAL_USERS);
   setStore('collections', []);
   setStore('expenses', []);
+  setStore('finance_credits', []);
 }
 
 function purgeStaleLocalData() {
   try {
+    if (typeof localStorage === 'undefined') return;
     if (localStorage.getItem('fecms_data_version') === LOCAL_DATA_VERSION) return;
     resetLocalStoresToAdminOnly();
     localStorage.setItem('fecms_data_version', LOCAL_DATA_VERSION);
@@ -144,13 +191,13 @@ export const api = {
             throw new Error('Invalid username or password');
           }
 
-          return {
+          return normalizeUser({
             id: data.id,
             username: data.username,
             full_name: data.full_name || data.username,
             role: data.role,
             phone: data.phone
-          };
+          });
         }
 
         throw new Error('Invalid username or password');
@@ -177,13 +224,13 @@ export const api = {
       throw new Error('Invalid username or password');
     }
 
-    return {
+    return normalizeUser({
       id: user.id,
       username: user.username,
       full_name: user.full_name || user.username,
       role: user.role,
       phone: user.phone
-    };
+    });
   },
 
   // --------------------------------------------------------------------------
@@ -397,8 +444,15 @@ export const api = {
         if (mode && mode !== 'ALL') {
           query = query.eq('payment_mode', mode);
         }
-        if (search) {
-          query = query.or(`donor_name.ilike.%${search}%,receipt_book_number.ilike.%${search}%`);
+        if (dateFrom) {
+          const fromDate = new Date(dateFrom);
+          fromDate.setHours(0, 0, 0, 0);
+          query = query.gte('created_at', fromDate.toISOString());
+        }
+        if (dateTo) {
+          const toDate = new Date(dateTo);
+          toDate.setHours(23, 59, 59, 999);
+          query = query.lte('created_at', toDate.toISOString());
         }
 
         const { data, error } = await query;
@@ -411,7 +465,7 @@ export const api = {
               ...item,
               payment_status: isPending ? 'PENDING' : 'PAID',
               notes: cleanNotes,
-              collector_name: item.users ? item.users.full_name : 'Unknown Member'
+              collector_name: item.users ? (item.users.full_name || item.users.username) : 'Member'
             };
           });
         }
@@ -429,21 +483,15 @@ export const api = {
       if (mode && mode !== 'ALL') {
         collections = collections.filter(c => c.payment_mode === mode);
       }
-      if (search) {
-        const q = search.toLowerCase();
-        collections = collections.filter(c => 
-          c.donor_name.toLowerCase().includes(q) || 
-          c.receipt_book_number.toLowerCase().includes(q) ||
-          (c.collector_name && c.collector_name.toLowerCase().includes(q))
-        );
-      }
       if (dateFrom) {
-        const from = new Date(dateFrom).getTime();
-        collections = collections.filter(c => new Date(c.created_at).getTime() >= from);
+        const fromDate = new Date(dateFrom);
+        fromDate.setHours(0, 0, 0, 0);
+        collections = collections.filter(c => new Date(c.created_at).getTime() >= fromDate.getTime());
       }
       if (dateTo) {
-        const to = new Date(dateTo).setHours(23, 59, 59, 999);
-        collections = collections.filter(c => new Date(c.created_at).getTime() <= to);
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        collections = collections.filter(c => new Date(c.created_at).getTime() <= toDate.getTime());
       }
 
       result = collections.map(c => {
@@ -456,8 +504,37 @@ export const api = {
       });
     }
 
+    // Status filter
     if (status && status !== 'ALL') {
       result = result.filter(c => c.payment_status === status);
+    }
+
+    // Search filter across all relevant fields
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(c => {
+        const donorName = (c.donor_name || '').toLowerCase();
+        const receiptNo = (c.receipt_book_number || '').toLowerCase();
+        const collectorName = (c.collector_name || '').toLowerCase();
+        const address = (c.donor_address || '').toLowerCase();
+        const phone = (c.donor_phone || '').toLowerCase();
+        const ref = (c.reference_number || '').toLowerCase();
+        const notes = (c.notes || '').toLowerCase();
+        const modeStr = (c.payment_mode || '').toLowerCase();
+        const statusStr = (c.payment_status || '').toLowerCase();
+        const amountStr = String(c.amount || '');
+
+        return donorName.includes(q) ||
+          receiptNo.includes(q) ||
+          collectorName.includes(q) ||
+          address.includes(q) ||
+          phone.includes(q) ||
+          ref.includes(q) ||
+          notes.includes(q) ||
+          modeStr.includes(q) ||
+          statusStr.includes(q) ||
+          amountStr.includes(q);
+      });
     }
 
     return result;
@@ -713,8 +790,11 @@ export const api = {
     return expenses[idx];
   },
 
-  async getExpenses({ category = '', status = '', memberId = '', search = '' } = {}) {
+  async getExpenses({ category = '', status = '', memberId = '', search = '', dateFrom = '', dateTo = '' } = {}) {
     await ensureRemoteSeedPurge();
+    let result = [];
+    let usedSupabase = false;
+
     if (isSupabaseConfigured()) {
       try {
         let query = supabase.from('expenses').select(`
@@ -732,13 +812,24 @@ export const api = {
         if (category && category !== 'ALL') {
           query = query.eq('category', category);
         }
+        if (dateFrom) {
+          const fromDate = new Date(dateFrom);
+          fromDate.setHours(0, 0, 0, 0);
+          query = query.gte('created_at', fromDate.toISOString());
+        }
+        if (dateTo) {
+          const toDate = new Date(dateTo);
+          toDate.setHours(23, 59, 59, 999);
+          query = query.lte('created_at', toDate.toISOString());
+        }
 
         const { data, error } = await query;
         if (!error && data) {
-          return data.map(item => ({
+          usedSupabase = true;
+          result = data.map(item => ({
             ...item,
-            submitter_name: item.submitter ? item.submitter.full_name : 'Member',
-            reviewer_name: item.reviewer ? item.reviewer.full_name : null
+            submitter_name: item.submitter ? (item.submitter.full_name || item.submitter.username) : 'Member',
+            reviewer_name: item.reviewer ? (item.reviewer.full_name || item.reviewer.username) : null
           }));
         }
       } catch (err) {
@@ -746,27 +837,55 @@ export const api = {
       }
     }
 
-    let expenses = getStore('expenses', INITIAL_EXPENSES);
+    if (!usedSupabase) {
+      let expenses = getStore('expenses', INITIAL_EXPENSES);
 
-    if (memberId) {
-      expenses = expenses.filter(e => e.submitted_by_user_id === memberId);
-    }
-    if (status && status !== 'ALL') {
-      expenses = expenses.filter(e => e.status === status);
-    }
-    if (category && category !== 'ALL') {
-      expenses = expenses.filter(e => e.category === category);
-    }
-    if (search) {
-      const q = search.toLowerCase();
-      expenses = expenses.filter(e => 
-        e.description.toLowerCase().includes(q) ||
-        e.category.toLowerCase().includes(q) ||
-        (e.submitter_name && e.submitter_name.toLowerCase().includes(q))
-      );
+      if (memberId) {
+        expenses = expenses.filter(e => e.submitted_by_user_id === memberId);
+      }
+      if (status && status !== 'ALL') {
+        expenses = expenses.filter(e => e.status === status);
+      }
+      if (category && category !== 'ALL') {
+        expenses = expenses.filter(e => e.category === category);
+      }
+      if (dateFrom) {
+        const fromDate = new Date(dateFrom);
+        fromDate.setHours(0, 0, 0, 0);
+        expenses = expenses.filter(e => new Date(e.created_at).getTime() >= fromDate.getTime());
+      }
+      if (dateTo) {
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        expenses = expenses.filter(e => new Date(e.created_at).getTime() <= toDate.getTime());
+      }
+
+      result = expenses;
     }
 
-    return expenses;
+    // Comprehensive multi-field search filter
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(e => {
+        const desc = (e.description || '').toLowerCase();
+        const cat = (e.category || '').toLowerCase();
+        const submitter = (e.submitter_name || '').toLowerCase();
+        const reviewer = (e.reviewer_name || '').toLowerCase();
+        const reason = (e.rejection_reason || '').toLowerCase();
+        const statusStr = (e.status || '').toLowerCase();
+        const amountStr = String(e.amount || '');
+
+        return desc.includes(q) ||
+          cat.includes(q) ||
+          submitter.includes(q) ||
+          reviewer.includes(q) ||
+          reason.includes(q) ||
+          statusStr.includes(q) ||
+          amountStr.includes(q);
+      });
+    }
+
+    return result;
   },
 
   async approveExpense(expenseId, reviewerUser) {
@@ -888,6 +1007,12 @@ export const api = {
       paymentModeBreakdown[c.payment_mode] = (paymentModeBreakdown[c.payment_mode] || 0) + Number(c.amount || 0);
     });
 
+    // 8. Finance Team Allocation totals
+    const allCredits = await this.getCreditHistory();
+    const totalCreditedToFinance = allCredits.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    const totalDebitedByFinance = totalApprovedExpenses;
+    const unspentFinanceBalance = Math.max(0, totalCreditedToFinance - totalDebitedByFinance);
+
     return {
       totalIncome: totalReceivedIncome,
       totalReceivedIncome,
@@ -903,6 +1028,9 @@ export const api = {
       totalCollectionsCount: collections.length,
       categoryBreakdown,
       paymentModeBreakdown,
+      totalCreditedToFinance,
+      totalDebitedByFinance,
+      unspentFinanceBalance,
       recentCollections: collections.slice(0, 5),
       recentExpenses: expenses.slice(0, 5)
     };
@@ -922,21 +1050,20 @@ export const api = {
           .order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data)) {
-          setStore('users', data);
-          return data;
+          const normalized = data.map(normalizeUser);
+          setStore('users', normalized);
+          return normalized;
         }
       } catch (err) {
         console.warn('Supabase getUsers error:', err);
       }
     }
 
-    return localUsers.map(({ id, username, full_name, role, phone, created_at }) => ({
-      id, username, full_name, role, phone, created_at
-    }));
+    return localUsers.map(normalizeUser);
   },
 
   async createUser(userData) {
-    const { username, password, full_name, role, phone } = userData;
+    const { username, password, full_name, role = 'COLLECTOR', phone } = userData;
 
     if (!username || username.trim().length < 3) {
       throw { field: 'username', message: 'Username must be at least 3 characters' };
@@ -946,12 +1073,15 @@ export const api = {
     }
     const cleanUsername = username.trim().toLowerCase().replace(/\s+/g, '');
     const cleanFullName = (full_name && full_name.trim()) ? full_name.trim() : cleanUsername;
+    const cleanPhone = (phone || '').replace(/\[ROLE:.*?\]/g, '').trim();
+    const upperRole = (role || 'COLLECTOR').toUpperCase();
+    const targetRole = (upperRole === 'FINANCE' ? 'FINANCE' : (upperRole === 'ADMIN' ? 'ADMIN' : 'COLLECTOR'));
 
     let createdUser = null;
 
     if (isSupabaseConfigured()) {
       try {
-        // Check if username already exists in Supabase
+        // 1. Check if username already exists in Supabase
         const { data: existingUser } = await supabase
           .from('users')
           .select('id')
@@ -962,50 +1092,74 @@ export const api = {
           throw { field: 'username', message: `Username @${cleanUsername} is already registered` };
         }
 
+        // 2. Prepare payload compatible with remote DB schema constraints:
+        // Remote DB uses role IN ('ADMIN', 'USER').
+        // FINANCE is encoded in the phone field via [ROLE:FINANCE].
+        const dbRole = targetRole === 'ADMIN' ? 'ADMIN' : 'USER';
+        const dbPhone = targetRole === 'FINANCE'
+          ? encodeRoleInPhone(cleanPhone, 'FINANCE')
+          : cleanPhone;
+
         const { data, error } = await supabase
           .from('users')
           .insert([{
             username: cleanUsername,
             password_hash: password,
             full_name: cleanFullName,
-            role: role || 'USER',
-            phone: phone ? phone.trim() : ''
+            role: dbRole,
+            phone: dbPhone,
+            is_active: true
           }])
-          .select('id, username, full_name, role, phone, created_at');
+          .select('id, username, full_name, role, phone, created_at')
+          .single();
 
-        if (!error && data && data.length > 0) {
-          createdUser = data[0];
-        } else if (error) {
+        if (error) {
           if (error.code === '23505' || (error.message && error.message.toLowerCase().includes('unique'))) {
             throw { field: 'username', message: `Username @${cleanUsername} is already registered` };
           }
-          console.warn('Supabase createUser error:', error.message);
+          console.error('Supabase createUser error:', error);
+          throw { field: 'general', message: `Database error: ${error.message}` };
+        }
+
+        if (data) {
+          createdUser = normalizeUser(data);
+          // Sync to local store
+          const users = getStore('users', INITIAL_USERS);
+          const idx = users.findIndex(u => u.username.toLowerCase() === cleanUsername);
+          if (idx >= 0) {
+            users[idx] = createdUser;
+          } else {
+            users.unshift(createdUser);
+          }
+          setStore('users', users);
+          return createdUser;
         }
       } catch (err) {
         if (err.field) throw err;
-        console.warn('Supabase createUser error, falling back to local:', err);
+        console.warn('Supabase createUser error, falling back to local store:', err);
       }
     }
 
+    // LocalStore fallback (if Supabase is not configured)
     const users = getStore('users', INITIAL_USERS);
     if (users.some(u => u.username.toLowerCase() === cleanUsername)) {
       throw { field: 'username', message: `Username @${cleanUsername} already exists` };
     }
 
-    const newUser = createdUser ? { ...createdUser, password } : {
+    const newUser = {
       id: 'u-' + Date.now(),
       username: cleanUsername,
       password: password,
       password_hash: password,
       full_name: cleanFullName,
-      role: role || 'USER',
-      phone: phone ? phone.trim() : '',
+      role: targetRole,
+      phone: cleanPhone,
       created_at: new Date().toISOString()
     };
 
     users.unshift(newUser);
     setStore('users', users);
-    return newUser;
+    return normalizeUser(newUser);
   },
 
   async updateUser(userId, userData) {
@@ -1020,12 +1174,13 @@ export const api = {
 
     const cleanUsername = username.trim().toLowerCase().replace(/\s+/g, '');
     const cleanFullName = (full_name && full_name.trim()) ? full_name.trim() : cleanUsername;
+    const cleanPhone = (phone || '').replace(/\[ROLE:.*?\]/g, '').trim();
+    const targetRole = role ? (role === 'FINANCE' ? 'FINANCE' : (role === 'ADMIN' ? 'ADMIN' : 'COLLECTOR')) : undefined;
 
     let updatedRow = null;
 
     if (isSupabaseConfigured()) {
       try {
-        // Check if username taken by someone else
         const { data: existingUser } = await supabase
           .from('users')
           .select('id')
@@ -1040,10 +1195,17 @@ export const api = {
         const updatePayload = {
           username: cleanUsername,
           full_name: cleanFullName,
-          role: role || 'USER',
-          phone: phone ? phone.trim() : '',
           updated_at: new Date().toISOString()
         };
+
+        if (targetRole) {
+          updatePayload.role = targetRole === 'ADMIN' ? 'ADMIN' : 'USER';
+          updatePayload.phone = targetRole === 'FINANCE' 
+            ? encodeRoleInPhone(cleanPhone, 'FINANCE') 
+            : cleanPhone;
+        } else {
+          updatePayload.phone = cleanPhone;
+        }
 
         if (password && password.trim()) {
           updatePayload.password_hash = password.trim();
@@ -1053,15 +1215,26 @@ export const api = {
           .from('users')
           .update(updatePayload)
           .eq('id', userId)
-          .select('id, username, full_name, role, phone, created_at');
+          .select('id, username, full_name, role, phone, created_at')
+          .single();
 
-        if (!error && data && data.length > 0) {
-          updatedRow = data[0];
-        } else if (error) {
+        if (error) {
           if (error.code === '23505' || (error.message && error.message.toLowerCase().includes('unique'))) {
             throw { field: 'username', message: `Username @${cleanUsername} is already taken by another account` };
           }
-          console.warn('Supabase updateUser error:', error.message);
+          console.error('Supabase updateUser error:', error);
+          throw { field: 'general', message: `Update error: ${error.message}` };
+        }
+
+        if (data) {
+          updatedRow = normalizeUser(data);
+          const users = getStore('users', INITIAL_USERS);
+          const idx = users.findIndex(u => u.id === userId);
+          if (idx >= 0) {
+            users[idx] = updatedRow;
+            setStore('users', users);
+          }
+          return updatedRow;
         }
       } catch (err) {
         if (err.field) throw err;
@@ -1069,16 +1242,18 @@ export const api = {
       }
     }
 
-    // Match in local store by id OR by username!
     const users = getStore('users', INITIAL_USERS);
     const idx = users.findIndex(u => u.id === userId || u.username.toLowerCase() === cleanUsername);
+
+    const prevRole = idx !== -1 ? users[idx].role : 'COLLECTOR';
+    const effectiveRole = targetRole || prevRole;
 
     const updatedUser = {
       id: updatedRow?.id || (idx !== -1 ? users[idx].id : userId),
       username: cleanUsername,
       full_name: cleanFullName,
-      role: role || (idx !== -1 ? users[idx].role : 'USER'),
-      phone: phone ? phone.trim() : '',
+      role: effectiveRole,
+      phone: cleanPhone,
       created_at: idx !== -1 ? users[idx].created_at : new Date().toISOString(),
       updated_at: new Date().toISOString(),
       ...(password && password.trim() ? { password: password.trim(), password_hash: password.trim() } : {})
@@ -1091,7 +1266,7 @@ export const api = {
     }
     setStore('users', users);
 
-    return updatedUser;
+    return normalizeUser(updatedUser);
   },
 
   async resetUserPassword(userId, newPassword) {
@@ -1105,8 +1280,173 @@ export const api = {
     });
   },
 
+  // --------------------------------------------------------------------------
+  // FINANCE CREDITS & BALANCES (Section 6 Business Rules: Credit allocation & debit upon approval)
+  // --------------------------------------------------------------------------
+  async getCreditHistory({ userId = '' } = {}) {
+    let credits = [];
+    let usedSupabase = false;
+
+    if (isSupabaseConfigured()) {
+      try {
+        let query = supabase
+          .from('finance_credits')
+          .select(`
+            *,
+            admin:credited_by (id, full_name, username)
+          `)
+          .order('created_at', { ascending: false });
+
+        if (userId) {
+          query = query.eq('user_id', userId);
+        }
+
+        const { data, error } = await query;
+        if (!error && Array.isArray(data)) {
+          usedSupabase = true;
+          credits = data.map(item => ({
+            ...item,
+            credited_by_name: item.admin?.full_name || item.admin?.username || 'Administrator'
+          }));
+          setStore('finance_credits', credits);
+        }
+      } catch (err) {
+        console.warn('Supabase getCreditHistory fallback to local store:', err);
+      }
+    }
+
+    if (!usedSupabase) {
+      credits = getStore('finance_credits', []);
+      if (userId) {
+        credits = credits.filter(c => c.user_id === userId);
+      }
+    }
+
+    return credits;
+  },
+
+  async addCredit({ userId, amount, payment_mode = 'BANK_TRANSFER', reference_number = '', notes = '', adminUser }) {
+    const numAmount = Number(amount);
+    if (!userId) {
+      throw { field: 'userId', message: 'Finance team member must be selected' };
+    }
+    if (isNaN(numAmount) || numAmount <= 0) {
+      throw { field: 'amount', message: 'Credit amount must be greater than zero' };
+    }
+
+    const cleanRef = (reference_number || '').trim();
+    const cleanNotes = (notes || '').trim();
+    const adminId = adminUser?.id || null;
+    const adminName = adminUser?.full_name || adminUser?.username || 'Administrator';
+
+    let createdRecord = null;
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('finance_credits')
+          .insert([{
+            user_id: userId,
+            amount: numAmount,
+            payment_mode,
+            reference_number: cleanRef,
+            notes: cleanNotes,
+            credited_by: adminId
+          }])
+          .select(`
+            *,
+            admin:credited_by (id, full_name, username)
+          `)
+          .single();
+
+        if (!error && data) {
+          createdRecord = {
+            ...data,
+            credited_by_name: data.admin?.full_name || data.admin?.username || adminName
+          };
+        }
+      } catch (err) {
+        console.warn('Supabase addCredit fallback to local store:', err);
+      }
+    }
+
+    if (!createdRecord) {
+      createdRecord = {
+        id: 'crd-' + Date.now(),
+        user_id: userId,
+        amount: numAmount,
+        payment_mode,
+        reference_number: cleanRef,
+        notes: cleanNotes,
+        credited_by: adminId,
+        credited_by_name: adminName,
+        created_at: new Date().toISOString()
+      };
+    }
+
+    const localCredits = getStore('finance_credits', []);
+    localCredits.unshift(createdRecord);
+    setStore('finance_credits', localCredits);
+
+    return createdRecord;
+  },
+
+  async getFinanceMemberBalance(userId) {
+    if (!userId) return null;
+
+    const [credits, expenses] = await Promise.all([
+      this.getCreditHistory({ userId }),
+      this.getExpenses({ memberId: userId })
+    ]);
+
+    const totalCredited = credits.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+
+    const approvedExpenses = expenses.filter(e => e.status === 'APPROVED');
+    const totalDebited = approvedExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+    const pendingExpenses = expenses.filter(e => e.status === 'PENDING');
+    const pendingBillsAmount = pendingExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+    const rejectedExpenses = expenses.filter(e => e.status === 'REJECTED');
+
+    const availableBalance = totalCredited - totalDebited;
+
+    return {
+      userId,
+      totalCredited,
+      totalDebited,
+      availableBalance,
+      pendingBillsAmount,
+      pendingBillsCount: pendingExpenses.length,
+      approvedBillsCount: approvedExpenses.length,
+      rejectedBillsCount: rejectedExpenses.length,
+      recentCredits: credits.slice(0, 5),
+      recentExpenses: expenses.slice(0, 5),
+      creditsList: credits,
+      expensesList: expenses
+    };
+  },
+
+  async getAllFinanceBalances() {
+    const users = await this.getUsers();
+    const financeUsers = users.filter(u => u.role === 'FINANCE');
+
+    const balances = await Promise.all(
+      financeUsers.map(async (u) => {
+        const bal = await this.getFinanceMemberBalance(u.id);
+        return {
+          user: u,
+          ...bal
+        };
+      })
+    );
+
+    return balances;
+  },
+
   resetDemoData() {
     resetLocalStoresToAdminOnly();
+    localStorage.removeItem('fecms_finance_credits');
     localStorage.setItem('fecms_data_version', LOCAL_DATA_VERSION);
   }
 };

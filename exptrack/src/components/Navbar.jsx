@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal }) {
-  const { user, isAdmin, isMember, logout } = useAuth();
+  const { user, isAdmin, isFinance, isCollector, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isConnected = isSupabaseConfigured();
 
@@ -36,13 +36,32 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
     { id: '/admin/users', label: 'User Accounts', icon: Users },
   ];
 
-  const memberNavItems = [
-    { id: '/member/record', label: 'Record Collection', icon: Wallet },
-    { id: '/member/upload', label: 'Submit Expense Bill', icon: Upload },
+  const financeNavItems = [
+    { id: '/finance/wallet', label: 'Finance Wallet', icon: Wallet },
+    { id: '/finance/upload', label: 'Submit Expense Bill', icon: Upload },
+    { id: '/finance/history', label: 'My Bills Ledger', icon: Receipt },
+  ];
+
+  const collectorNavItems = [
+    { id: '/member/record', label: 'Record Collection', icon: BookOpen },
     { id: '/member/history', label: 'My Book & History', icon: History },
   ];
 
-  const currentNavItems = isAdmin ? adminNavItems : memberNavItems;
+  const currentNavItems = isAdmin 
+    ? adminNavItems 
+    : (isFinance ? financeNavItems : collectorNavItems);
+
+  const getRoleLabel = () => {
+    if (isAdmin) return 'Treasurer / Admin';
+    if (isFinance) return 'Finance Manager';
+    return 'Field Collector';
+  };
+
+  const getDefaultHomeRoute = () => {
+    if (isAdmin) return '/admin/overview';
+    if (isFinance) return '/finance/wallet';
+    return '/member/record';
+  };
 
   return (
     <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md">
@@ -52,7 +71,7 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
           {/* Brand Logo & Title */}
           <div className="flex items-center gap-3">
             <div 
-              onClick={() => onNavigate(isAdmin ? '/admin/overview' : '/member/record')}
+              onClick={() => onNavigate(getDefaultHomeRoute())}
               className="flex items-center gap-2.5 cursor-pointer group"
             >
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-md shadow-emerald-900/30 group-hover:scale-105 transition shrink-0">
@@ -101,8 +120,10 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
             <div className="hidden lg:flex items-center gap-3">
               <div className="text-right">
                 <div className="text-xs font-bold text-slate-100">{user?.full_name || user?.username}</div>
-                <div className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">
-                  {isAdmin ? 'Treasurer / Admin' : 'Field Collector'}
+                <div className={`text-[10px] uppercase font-bold tracking-wider ${
+                  isAdmin ? 'text-purple-400' : (isFinance ? 'text-emerald-400' : 'text-blue-400')
+                }`}>
+                  {getRoleLabel()}
                 </div>
               </div>
 
@@ -137,7 +158,11 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <div>
               <p className="text-sm font-bold text-white">{user?.full_name || user?.username}</p>
-              <p className="text-xs text-slate-400">{user?.role === 'ADMIN' ? 'Treasurer / Admin' : 'Field Collector'}</p>
+              <p className={`text-xs font-bold ${
+                isAdmin ? 'text-purple-400' : (isFinance ? 'text-emerald-400' : 'text-blue-400')
+              }`}>
+                {getRoleLabel()}
+              </p>
             </div>
           </div>
 

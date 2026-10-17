@@ -2,10 +2,13 @@ import { createClient } from '@supabase/supabase-js';
 
 // Get config from env or localStorage
 const getStoredConfig = () => {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL;
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const localUrl = localStorage.getItem('fecms_supabase_url');
-  const localKey = localStorage.getItem('fecms_supabase_key');
+  const metaEnv = (typeof import.meta !== 'undefined' && import.meta.env) 
+    ? import.meta.env 
+    : (typeof process !== 'undefined' && process.env ? process.env : {});
+  const envUrl = metaEnv.VITE_SUPABASE_URL;
+  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY;
+  const localUrl = typeof localStorage !== 'undefined' ? localStorage.getItem('fecms_supabase_url') : null;
+  const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('fecms_supabase_key') : null;
 
   return {
     url: localUrl || envUrl || '',

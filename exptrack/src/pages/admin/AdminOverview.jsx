@@ -16,7 +16,8 @@ import {
   PieChart,
   BarChart3,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  Coins
 } from 'lucide-react';
 import { formatINR, formatINRCompact } from '../../lib/money';
 
@@ -62,10 +63,10 @@ export default function AdminOverview({ onNavigate }) {
         <div>
           <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-2">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Treasurer & Executive Dashboard</span>
+            <span>Treasurer &amp; Executive Dashboard</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-            Financial Ledger & Balance Overview
+            Financial Ledger &amp; Balance Overview
           </h1>
           <p className="text-xs text-slate-500 mt-1">
             Real-time accounting rule: Net Balance = Total Collections &minus; Admin Approved Expenses only.
@@ -95,7 +96,7 @@ export default function AdminOverview({ onNavigate }) {
         </div>
       </div>
 
-      {/* 4 Primary KPI Cards (As required by PDF Section 5) */}
+      {/* 4 Primary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {/* KPI 1: Total Collections / Income */}
         <KpiCard
@@ -144,6 +145,35 @@ export default function AdminOverview({ onNavigate }) {
           subtitle="Waiting in approval queue"
           onClick={() => onNavigate('/admin/approvals')}
         />
+      </div>
+
+      {/* Finance Team Allocation Banner */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+            <Coins className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="font-bold text-slate-900 text-sm">Finance Team Credit Allocations</div>
+            <div className="text-xs text-slate-500">
+              Total Credited: <strong className="text-slate-800">{formatINR(metrics.totalCreditedToFinance || 0)}</strong> &bull; Debited by Approved Bills: <strong className="text-slate-800">{formatINR(metrics.totalDebitedByFinance || 0)}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 self-end sm:self-auto">
+          <div className="text-right">
+            <div className="text-[10px] text-slate-400 uppercase font-bold">Unspent in Wallets</div>
+            <div className="text-sm font-extrabold text-emerald-600">{formatINR(metrics.unspentFinanceBalance || 0)}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('/admin/users')}
+            className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 transition cursor-pointer"
+          >
+            Manage Balances &rarr;
+          </button>
+        </div>
       </div>
 
       {/* Breakdown Panels */}

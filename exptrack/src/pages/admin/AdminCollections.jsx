@@ -77,14 +77,16 @@ export default function AdminCollections() {
   };
 
   useEffect(() => {
+    setPage(1);
     loadCollections();
   }, [modeFilter, statusFilter, dateFrom, dateTo]);
 
   // Handle live search
   useEffect(() => {
+    setPage(1);
     const timer = setTimeout(() => {
       loadCollections();
-    }, 250);
+    }, 200);
     return () => clearTimeout(timer);
   }, [search]);
 
@@ -141,6 +143,7 @@ export default function AdminCollections() {
     setStatusFilter('ALL');
     setDateFrom('');
     setDateTo('');
+    setPage(1);
   };
 
   // Open Edit Modal
@@ -298,8 +301,18 @@ export default function AdminCollections() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search donor name, receipt #, collector, area..."
-              className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none"
+              className="w-full rounded-lg border border-slate-300 pl-9 pr-8 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
           {/* Payment Status Filter */}
@@ -501,6 +514,52 @@ export default function AdminCollections() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Bottom Filter & Search Summary Bar */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-4 sm:p-5 border border-slate-700 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase font-extrabold tracking-wider text-emerald-400 flex items-center gap-1.5">
+                <Wallet className="w-4 h-4" />
+                <span>Collection Ledger Summary</span>
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                {collections.length} {collections.length === 1 ? 'Receipt' : 'Receipts'}
+              </span>
+              {(search || modeFilter !== 'ALL' || statusFilter !== 'ALL' || dateFrom || dateTo) && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Filtered
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400">
+              Total calculated sum for all current matching collection entries
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="bg-slate-800/90 border border-slate-700 px-4 py-2.5 rounded-xl text-right">
+              <div className="text-[10px] uppercase font-bold text-slate-400">Total Filtered Amount</div>
+              <div className="text-lg sm:text-xl font-black text-white">{formatINR(totalAmount)}</div>
+            </div>
+
+            <div className="bg-emerald-950/40 border border-emerald-500/30 px-4 py-2.5 rounded-xl text-right">
+              <div className="text-[10px] uppercase font-bold text-emerald-400">Received (Paid)</div>
+              <div className="text-base sm:text-lg font-black text-emerald-400">{formatINR(totalReceived)}</div>
+              <div className="text-[10px] text-emerald-300/70">{receivedCollections.length} Paid</div>
+            </div>
+
+            {totalPending > 0 && (
+              <div className="bg-amber-950/40 border border-amber-500/30 px-4 py-2.5 rounded-xl text-right">
+                <div className="text-[10px] uppercase font-bold text-amber-400">Pending Due</div>
+                <div className="text-base sm:text-lg font-black text-amber-400">{formatINR(totalPending)}</div>
+                <div className="text-[10px] text-amber-300/70">{pendingCollections.length} Due</div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Edit Collection Modal */}

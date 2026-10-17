@@ -9,6 +9,9 @@ import RecordCollection from './pages/member/RecordCollection';
 import UploadExpense from './pages/member/UploadExpense';
 import MemberHistory from './pages/member/MemberHistory';
 
+import FinanceWallet from './pages/finance/FinanceWallet';
+import FinanceBillsHistory from './pages/finance/FinanceBillsHistory';
+
 import AdminOverview from './pages/admin/AdminOverview';
 import AdminApprovals from './pages/admin/AdminApprovals';
 import AdminCollections from './pages/admin/AdminCollections';
@@ -16,7 +19,7 @@ import AdminExpenses from './pages/admin/AdminExpenses';
 import AdminUsers from './pages/admin/AdminUsers';
 
 function MainApp() {
-  const { user, isAdmin, isMember } = useAuth();
+  const { user, isAdmin, isFinance, isCollector } = useAuth();
   
   // Current route state
   const [currentRoute, setCurrentRoute] = useState(() => {
@@ -31,11 +34,15 @@ function MainApp() {
     if (!user) {
       setCurrentRoute('/login');
     } else if (currentRoute === '/login' || currentRoute === '/') {
-      setCurrentRoute(isAdmin ? '/admin/overview' : '/member/record');
-    } else if (isMember && currentRoute.startsWith('/admin')) {
+      if (isAdmin) setCurrentRoute('/admin/overview');
+      else if (isFinance) setCurrentRoute('/finance/wallet');
+      else setCurrentRoute('/member/record');
+    } else if (isCollector && (currentRoute.startsWith('/admin') || currentRoute.startsWith('/finance') || currentRoute === '/member/upload')) {
       setCurrentRoute('/member/record');
+    } else if (isFinance && (currentRoute.startsWith('/admin') || currentRoute.startsWith('/member'))) {
+      setCurrentRoute('/finance/wallet');
     }
-  }, [user, isAdmin, isMember]);
+  }, [user, isAdmin, isFinance, isCollector]);
 
   const handleNavigate = (route) => {
     setCurrentRoute(route);
@@ -70,18 +77,25 @@ function MainApp() {
   // Render active screen
   const renderScreen = () => {
     switch (currentRoute) {
-      // Member Routes
+      // Field Collector Routes (Expense submission removed)
       case '/member/record':
         return <RecordCollection onCollectionAdded={handleTriggerRefresh} />;
+      case '/member/history':
+        return <MemberHistory key={refreshKey} />;
+
+      // Finance Manager Routes (Controls finance, submits bills, tracks balance & debits)
+      case '/finance/wallet':
+        return <FinanceWallet key={refreshKey} onNavigate={handleNavigate} />;
+      case '/finance/upload':
       case '/member/upload':
         return (
           <UploadExpense 
             onExpenseSubmitted={handleTriggerRefresh}
-            onNavigateHistory={() => handleNavigate('/member/history')}
+            onNavigateHistory={() => handleNavigate('/finance/history')}
           />
         );
-      case '/member/history':
-        return <MemberHistory key={refreshKey} />;
+      case '/finance/history':
+        return <FinanceBillsHistory key={refreshKey} onNavigate={handleNavigate} />;
 
       // Admin Routes
       case '/admin/overview':
@@ -96,9 +110,9 @@ function MainApp() {
         return <AdminUsers key={refreshKey} />;
 
       default:
-        return isAdmin 
-          ? <AdminOverview key={refreshKey} onNavigate={handleNavigate} /> 
-          : <RecordCollection onCollectionAdded={handleTriggerRefresh} />;
+        if (isAdmin) return <AdminOverview key={refreshKey} onNavigate={handleNavigate} />;
+        if (isFinance) return <FinanceWallet key={refreshKey} onNavigate={handleNavigate} />;
+        return <RecordCollection onCollectionAdded={handleTriggerRefresh} />;
     }
   };
 

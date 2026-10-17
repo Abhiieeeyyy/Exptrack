@@ -12,11 +12,14 @@ import {
   AlertCircle, 
   X, 
   Eye, 
-  Clock,
-  HelpCircle,
-  Sparkles,
-  PlusCircle,
-  Tag
+  Clock, 
+  HelpCircle, 
+  Sparkles, 
+  PlusCircle, 
+  Tag,
+  Wallet,
+  Coins,
+  ArrowDownLeft
 } from 'lucide-react';
 import { formatINR } from '../../lib/money';
 
@@ -33,14 +36,27 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
   const [filePreview, setFilePreview] = useState(null);
   const [fileName, setFileName] = useState('');
   const [fileSizeStr, setFileSizeStr] = useState('');
+  const [walletData, setWalletData] = useState(null);
 
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
   const [successExpense, setSuccessExpense] = useState(null);
 
+  const loadWallet = async () => {
+    if (user?.id) {
+      try {
+        const bal = await api.getFinanceMemberBalance(user.id);
+        setWalletData(bal);
+      } catch (err) {
+        console.warn('Could not load wallet data:', err);
+      }
+    }
+  };
+
   useEffect(() => {
     setAvailableCategories(api.getExpenseCategories());
-  }, []);
+    loadWallet();
+  }, [user]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -93,7 +109,6 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
       errs.amount = 'Valid expense amount (> ₹0) is required';
     }
 
-    // Note: Bill Description & Purpose is OPTIONAL per requirements
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -139,6 +154,8 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
       setDescription('');
       handleRemoveFile();
 
+      await loadWallet();
+
       if (onExpenseSubmitted) onExpenseSubmitted();
     } catch (err) {
       if (err.field) {
@@ -151,44 +168,73 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
     }
   };
 
+  const availableBalance = walletData?.availableBalance || 0;
+  const numAmount = Number(amount) || 0;
+  const hasEnteredAmount = numAmount > 0;
+  const isOverBalance = hasEnteredAmount && numAmount > availableBalance;
+  const projectedBalance = availableBalance - numAmount;
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 text-white shadow-md border border-slate-700/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-400 text-xs font-semibold mb-2">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Bill Submission Portal</span>
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-semibold mb-2">
+            <Wallet className="w-3.5 h-3.5" />
+            <span>Finance Management &bull; Expenditure Portal</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-white">
             Submit Expense Bill
           </h1>
           <p className="text-xs text-slate-300 mt-1">
-            Upload bills and invoices for admin review & ledger approval.
+            Submit expense receipts for Admin audit. Upon approval, the bill amount is automatically debited from your credited balance.
           </p>
         </div>
 
         <div className="bg-slate-800/80 border border-slate-700 px-4 py-2 rounded-xl text-right shrink-0">
           <div className="text-[11px] text-slate-400 font-medium">Submitting As</div>
-          <div className="text-sm font-bold text-slate-200">{user?.full_name}</div>
+          <div className="text-sm font-bold text-slate-200">{user?.full_name || user?.username}</div>
+          <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Finance Manager</span>
         </div>
       </div>
 
-      {/* Success Banner */}
-      {successExpense && (
-        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+      {/* Available Balance Card */}
+      {walletData && (
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-              <Clock className="w-6 h-6 text-amber-600" />
+            <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <Wallet className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-sm font-bold text-amber-950 flex items-center gap-2">
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Your Available Balance</div>
+              <div className="text-2xl font-extrabold text-slate-900 mt-0.5">
+                {formatINR(availableBalance)}
+              </div>
+            </div>
+          </div>
+
+          <div className="text-left sm:text-right border-t sm:border-t-0 sm:border-l border-slate-100 pt-2 sm:pt-0 sm:pl-4 text-xs text-slate-500 space-y-0.5">
+            <div>Total Credited by Admin: <span className="font-bold text-slate-800">{formatINR(walletData.totalCredited)}</span></div>
+            <div>Debited (Approved Bills): <span className="font-bold text-slate-800">{formatINR(walletData.totalDebited)}</span></div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Banner */}
+      {successExpense && (
+        <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-emerald-950 flex items-center gap-2">
                 <span>Bill Submitted for Approval</span>
                 <StatusBadge status="PENDING" size="sm" />
               </p>
-              <p className="text-xs text-amber-800 mt-0.5">
+              <p className="text-xs text-emerald-800 mt-0.5">
                 <span className="font-bold">{formatINR(successExpense.amount, true)}</span> under{' '}
-                <span className="font-medium">{successExpense.category}</span> is now queued in the Treasurer's review list.
+                <span className="font-medium">{successExpense.category}</span> is now queued in the Treasurer's audit list. When approved, it will debit from your balance.
               </p>
             </div>
           </div>
@@ -198,7 +244,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
               <button
                 type="button"
                 onClick={onNavigateHistory}
-                className="px-3 py-1.5 text-xs font-bold text-amber-900 bg-amber-200 hover:bg-amber-300 rounded-lg transition cursor-pointer"
+                className="px-3 py-1.5 text-xs font-bold text-emerald-950 bg-emerald-200 hover:bg-emerald-300 rounded-lg transition cursor-pointer"
               >
                 Track Status
               </button>
@@ -206,7 +252,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
             <button
               type="button"
               onClick={() => setSuccessExpense(null)}
-              className="text-xs text-amber-700 hover:text-amber-900 px-2 py-1 cursor-pointer"
+              className="text-xs text-emerald-700 hover:text-emerald-900 px-2 py-1 cursor-pointer"
             >
               Dismiss
             </button>
@@ -284,6 +330,27 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
               error={errors.amount}
               showChips={true}
             />
+
+            {/* Debit Impact Notice */}
+            {hasEnteredAmount && walletData && (
+              <div className="mt-2">
+                {isOverBalance ? (
+                  <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-900 space-y-0.5">
+                    <div className="font-bold flex items-center gap-1">
+                      <span>⚠️ Exceeds Available Balance</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-snug">
+                      Bill amount ({formatINR(numAmount)}) exceeds your current balance ({formatINR(availableBalance)}) by {formatINR(numAmount - availableBalance)}. You may still submit; Admin will review or credit top-up funds.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 flex items-center justify-between">
+                    <span>Balance remaining after debit:</span>
+                    <span className="font-extrabold text-emerald-700">{formatINR(projectedBalance)}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -379,7 +446,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
 
         {/* Business Rule Reminder Note */}
         <div className="rounded-xl bg-slate-50 p-3.5 border border-slate-200 text-xs text-slate-600 leading-relaxed">
-          <span className="font-bold text-slate-800">Audit Policy:</span> All bills are submitted in <span className="font-bold text-amber-600">PENDING</span> state. They will only be accounted in the Net Balance once reviewed and <span className="font-bold text-emerald-600">APPROVED</span> by the Admin/Treasurer.
+          <span className="font-bold text-slate-800">Section 6 Audit Policy:</span> All bills are submitted in <span className="font-bold text-amber-600">PENDING</span> state. Once approved by the Admin, the amount is deducted from your allocated balance and accounted in the official ledger.
         </div>
 
         {/* Submit Buttons */}

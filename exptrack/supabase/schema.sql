@@ -1,21 +1,21 @@
 -- ==============================================================================
 -- FECMS: Function Expense & Collection Management System
 -- Supabase PostgreSQL Database Schema & Row Level Security (RLS)
--- Updated with Book Leaf Sequences, Optional Bill Descriptions & Passkey Auth
+-- Updated with Finance Role, Finance Credit Allocations & Real-time Debit Ledger
 -- ==============================================================================
 
 -- Enable UUID Extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ------------------------------------------------------------------------------
--- 1. USERS TABLE (Admin Treasurers & Field Collectors)
+-- 1. USERS TABLE (Admin Treasurers, Field Collectors & Finance Managers)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     username VARCHAR(100) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     full_name VARCHAR(255),
-    role VARCHAR(20) NOT NULL DEFAULT 'USER' CHECK (role IN ('ADMIN', 'USER')),
+    role VARCHAR(20) NOT NULL DEFAULT 'COLLECTOR' CHECK (role IN ('ADMIN', 'USER', 'COLLECTOR', 'FINANCE')),
     phone VARCHAR(50),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -30,15 +30,15 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS collections (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    receipt_book_number VARCHAR(100) UNIQUE NOT NULL, -- e.g. '001-01' or '002-51' depending on the book's leaf range
+    receipt_book_number VARCHAR(100) UNIQUE NOT NULL, -- e.g. '001-01' or '002-51'
     collected_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     donor_name VARCHAR(255) NOT NULL,
-    donor_address TEXT, -- Area of collection & location
+    donor_address TEXT,
     donor_phone VARCHAR(50),
     amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
     payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID' CHECK (payment_status IN ('PAID', 'PENDING')),
     payment_mode VARCHAR(30) NOT NULL CHECK (payment_mode IN ('CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE')),
-    reference_number VARCHAR(100), -- Cheque No / Bank UTR (Optional for UPI/CASH)
+    reference_number VARCHAR(100),
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -50,15 +50,15 @@ CREATE INDEX IF NOT EXISTS idx_collections_receipt ON collections(receipt_book_n
 CREATE INDEX IF NOT EXISTS idx_collections_created_at ON collections(created_at DESC);
 
 -- ------------------------------------------------------------------------------
--- 3. EXPENSES TABLE (Spending with Custom Categories & Optional Descriptions)
+-- 3. EXPENSES TABLE (Submitted by Finance Managers, Audited & Approved by Admin)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS expenses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     submitted_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    category VARCHAR(100) NOT NULL, -- Standard or Custom Category
+    category VARCHAR(100) NOT NULL,
     amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
-    description TEXT, -- Optional description & purpose
-    bill_image_url TEXT, -- Optional bill document/photo URL
+    description TEXT,
+    bill_image_url TEXT,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     rejection_reason TEXT,
     reviewed_by UUID REFERENCES users(id) ON DELETE RESTRICT,
@@ -74,7 +74,24 @@ CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
 CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at DESC);
 
 -- ------------------------------------------------------------------------------
--- 4. STORAGE BUCKET CONFIGURATION (for bill receipts)
+-- 4. FINANCE CREDITS TABLE (Admin fund allocations to Finance Team members)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS finance_credits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+    credited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    payment_mode VARCHAR(30) DEFAULT 'BANK_TRANSFER',
+    reference_number VARCHAR(100),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_credits_user ON finance_credits(user_id);
+CREATE INDEX IF NOT EXISTS idx_finance_credits_created_at ON finance_credits(created_at DESC);
+
+-- ------------------------------------------------------------------------------
+-- 5. STORAGE BUCKET CONFIGURATION (for bill receipts)
 -- ------------------------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
@@ -86,7 +103,6 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Storage RLS policies for bills
 CREATE POLICY "Public Read Access for Bills" ON storage.objects
 FOR SELECT USING (bucket_id = 'bills');
 
@@ -94,23 +110,17 @@ CREATE POLICY "Authenticated Users Can Upload Bills" ON storage.objects
 FOR INSERT WITH CHECK (bucket_id = 'bills');
 
 -- ------------------------------------------------------------------------------
--- 5. ROW LEVEL SECURITY (RLS) POLICIES
+-- 6. ROW LEVEL SECURITY (RLS) POLICIES
 -- ------------------------------------------------------------------------------
--- Disable RLS for custom passkey auth & transparent client-side operations:
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE collections DISABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses DISABLE ROW LEVEL SECURITY;
-
--- If you prefer keeping RLS enabled, run the permissive policies below instead:
--- CREATE POLICY "Enable all operations for users" ON users FOR ALL TO public USING (true) WITH CHECK (true);
--- CREATE POLICY "Enable all operations for collections" ON collections FOR ALL TO public USING (true) WITH CHECK (true);
--- CREATE POLICY "Enable all operations for expenses" ON expenses FOR ALL TO public USING (true) WITH CHECK (true);
+ALTER TABLE finance_credits DISABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------------------------------------------
--- 6. ADMIN ACCOUNT ONLY (no demo members, collections, or bills)
+-- 7. ADMIN ACCOUNT INITIAL SEED
 -- ------------------------------------------------------------------------------
 INSERT INTO users (id, username, password_hash, full_name, role, phone)
 VALUES
     ('a0000000-0000-0000-0000-000000000001', 'admin', 'Admin@skat369', 'Administrator', 'ADMIN', '')
 ON CONFLICT (username) DO NOTHING;
-

@@ -15,7 +15,9 @@ import {
   CheckCircle2,
   Clock,
   XCircle,
-  FileText
+  FileText,
+  Calendar,
+  Wallet
 } from 'lucide-react';
 import { formatINR } from '../../lib/money';
 
@@ -27,6 +29,8 @@ export default function AdminExpenses() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -41,6 +45,8 @@ export default function AdminExpenses() {
         search,
         status: statusFilter,
         category: categoryFilter,
+        dateFrom,
+        dateTo
       });
       setExpenses(data);
     } catch (err) {
@@ -51,20 +57,27 @@ export default function AdminExpenses() {
   };
 
   useEffect(() => {
+    setPage(1);
     loadExpenses();
-  }, [statusFilter, categoryFilter]);
+  }, [statusFilter, categoryFilter, dateFrom, dateTo]);
 
   useEffect(() => {
+    setPage(1);
     const timer = setTimeout(() => {
       loadExpenses();
-    }, 250);
+    }, 200);
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Totals
-  const totalApproved = expenses
-    .filter(e => e.status === 'APPROVED')
-    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  // Totals calculations for current filtered dataset
+  const totalAmount = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const approvedExpenses = expenses.filter(e => e.status === 'APPROVED');
+  const pendingExpenses = expenses.filter(e => e.status === 'PENDING');
+  const rejectedExpenses = expenses.filter(e => e.status === 'REJECTED');
+
+  const totalApproved = approvedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalPending = pendingExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalRejected = rejectedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   const totalPages = Math.ceil(expenses.length / ITEMS_PER_PAGE) || 1;
   const paginatedData = expenses.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -98,6 +111,15 @@ export default function AdminExpenses() {
     );
   };
 
+  const handleResetFilters = () => {
+    setSearch('');
+    setStatusFilter('ALL');
+    setCategoryFilter('ALL');
+    setDateFrom('');
+    setDateTo('');
+    setPage(1);
+  };
+
   const allCategories = api.getExpenseCategories ? api.getExpenseCategories() : EXPENSE_CATEGORIES;
 
   return (
@@ -121,6 +143,7 @@ export default function AdminExpenses() {
           <div className="bg-slate-800 border border-slate-700 px-4 py-2 rounded-xl text-right">
             <div className="text-[10px] text-slate-400 font-bold uppercase">Approved Total</div>
             <div className="text-base font-extrabold text-white">{formatINR(totalApproved)}</div>
+            <div className="text-[10px] text-emerald-400">{approvedExpenses.length} Approved Bills</div>
           </div>
 
           <button
@@ -137,18 +160,28 @@ export default function AdminExpenses() {
 
       {/* Filter Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           
           {/* Search */}
-          <div className="relative">
+          <div className="relative lg:col-span-2">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search description, category, member..."
-              className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none"
+              placeholder="Search description, category, member, amount..."
+              className="w-full rounded-lg border border-slate-300 pl-9 pr-8 py-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-none"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
           {/* Status Filter */}
@@ -179,14 +212,34 @@ export default function AdminExpenses() {
             </select>
           </div>
 
+          {/* Date Range Filters */}
+          <div className="grid grid-cols-2 gap-2 lg:col-span-1">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              placeholder="From Date"
+              title="Filter by submission date from"
+              className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-none"
+            />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              placeholder="To Date"
+              title="Filter by submission date to"
+              className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
+
         </div>
 
-        {(search || statusFilter !== 'ALL' || categoryFilter !== 'ALL') && (
+        {(search || statusFilter !== 'ALL' || categoryFilter !== 'ALL' || dateFrom || dateTo) && (
           <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500">
             <span>Showing filtered results ({expenses.length} records)</span>
             <button
               type="button"
-              onClick={() => { setSearch(''); setStatusFilter('ALL'); setCategoryFilter('ALL'); }}
+              onClick={handleResetFilters}
               className="inline-flex items-center gap-1 text-emerald-700 font-bold hover:underline cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" /> Reset Filters
@@ -309,6 +362,60 @@ export default function AdminExpenses() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Bottom Filter & Search Summary Bar */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-4 sm:p-5 border border-slate-700 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase font-extrabold tracking-wider text-emerald-400 flex items-center gap-1.5">
+                <Receipt className="w-4 h-4" />
+                <span>Expense Ledger Summary</span>
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                {expenses.length} {expenses.length === 1 ? 'Bill' : 'Bills'}
+              </span>
+              {(search || statusFilter !== 'ALL' || categoryFilter !== 'ALL' || dateFrom || dateTo) && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Filtered
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400">
+              Total calculated expenditure for all current matching bill records
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="bg-slate-800/90 border border-slate-700 px-4 py-2.5 rounded-xl text-right">
+              <div className="text-[10px] uppercase font-bold text-slate-400">Total Filtered Amount</div>
+              <div className="text-lg sm:text-xl font-black text-white">{formatINR(totalAmount)}</div>
+            </div>
+
+            <div className="bg-emerald-950/40 border border-emerald-500/30 px-4 py-2.5 rounded-xl text-right">
+              <div className="text-[10px] uppercase font-bold text-emerald-400">Approved (Official)</div>
+              <div className="text-base sm:text-lg font-black text-emerald-400">{formatINR(totalApproved)}</div>
+              <div className="text-[10px] text-emerald-300/70">{approvedExpenses.length} Approved</div>
+            </div>
+
+            {pendingExpenses.length > 0 && (
+              <div className="bg-amber-950/40 border border-amber-500/30 px-4 py-2.5 rounded-xl text-right">
+                <div className="text-[10px] uppercase font-bold text-amber-400">Pending Audit</div>
+                <div className="text-base sm:text-lg font-black text-amber-400">{formatINR(totalPending)}</div>
+                <div className="text-[10px] text-amber-300/70">{pendingExpenses.length} Pending</div>
+              </div>
+            )}
+
+            {rejectedExpenses.length > 0 && (
+              <div className="bg-rose-950/40 border border-rose-500/30 px-4 py-2.5 rounded-xl text-right">
+                <div className="text-[10px] uppercase font-bold text-rose-400">Rejected</div>
+                <div className="text-base sm:text-lg font-black text-rose-400">{formatINR(totalRejected)}</div>
+                <div className="text-[10px] text-rose-300/70">{rejectedExpenses.length} Rejected</div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Bill Preview Modal */}

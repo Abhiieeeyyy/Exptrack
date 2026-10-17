@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(100) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     full_name VARCHAR(255),
-    role VARCHAR(20) NOT NULL DEFAULT 'USER' CHECK (role IN ('ADMIN', 'USER')),
+    role VARCHAR(20) NOT NULL DEFAULT 'COLLECTOR' CHECK (role IN ('ADMIN', 'USER', 'COLLECTOR', 'FINANCE')),
     phone VARCHAR(50),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS collections (
     donor_address TEXT,
     donor_phone VARCHAR(50),
     amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+    payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID' CHECK (payment_status IN ('PAID', 'PENDING')),
     payment_mode VARCHAR(30) NOT NULL CHECK (payment_mode IN ('CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE')),
     reference_number VARCHAR(100),
     notes TEXT,
@@ -96,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_collections_user ON collections(collected_by_user
 CREATE INDEX IF NOT EXISTS idx_collections_receipt ON collections(receipt_book_number);
 CREATE INDEX IF NOT EXISTS idx_collections_created_at ON collections(created_at DESC);
 
--- 3. EXPENSES TABLE
+-- 3. EXPENSES TABLE (Submitted by Finance Managers)
 CREATE TABLE IF NOT EXISTS expenses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     submitted_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -116,7 +117,20 @@ CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(submitted_by_user_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
 CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at DESC);
 
--- 4. STORAGE BUCKET FOR BILLS
+-- 4. FINANCE CREDITS TABLE (Admin fund allocations to Finance Managers)
+CREATE TABLE IF NOT EXISTS finance_credits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount DECIMAL(12,2) NOT NULL CHECK (amount > 0),
+    credited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    payment_mode VARCHAR(30) DEFAULT 'BANK_TRANSFER',
+    reference_number VARCHAR(100),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_finance_credits_user ON finance_credits(user_id);
+
+-- 5. STORAGE BUCKET FOR BILLS
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('bills', 'bills', true, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
 ON CONFLICT (id) DO NOTHING;
@@ -124,18 +138,15 @@ ON CONFLICT (id) DO NOTHING;
 CREATE POLICY "Public Read Access for Bills" ON storage.objects FOR SELECT USING (bucket_id = 'bills');
 CREATE POLICY "Authenticated Users Can Upload Bills" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'bills');
 
--- 5. ROW LEVEL SECURITY
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE collections ENABLE ROW LEVEL SECURITY;
-ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
+-- 6. DISABLE RLS FOR CUSTOM CLIENT AUTH
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE collections DISABLE ROW LEVEL SECURITY;
+ALTER TABLE expenses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE finance_credits DISABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Enable read access for all authenticated users" ON users FOR SELECT USING (true);
-CREATE POLICY "Enable all operations for authenticated collections" ON collections FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all operations for authenticated expenses" ON expenses FOR ALL USING (true) WITH CHECK (true);
-
--- 6. INITIAL ADMIN USER (admin / admin123)
+-- 7. INITIAL ADMIN USER
 INSERT INTO users (id, username, password_hash, full_name, role, phone)
-VALUES ('a0000000-0000-0000-0000-000000000001', 'admin', '$2a$10$7r/1kO.2j1x6Xm8X3W5Oqum2s6u0A6I9Xm2E1yv7Xl2Z6q2Xm8X3W', 'Rajesh Sharma', 'ADMIN', '+91 98765 43210')
+VALUES ('a0000000-0000-0000-0000-000000000001', 'admin', 'Admin@skat369', 'Administrator', 'ADMIN', '')
 ON CONFLICT (username) DO NOTHING;
 `;
     navigator.clipboard.writeText(schemaSql);

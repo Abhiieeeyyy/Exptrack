@@ -27,7 +27,13 @@ export default function Login({ onLoginSuccess }) {
     try {
       const user = await login(username, password);
       if (onLoginSuccess) {
-        onLoginSuccess(user.role === 'ADMIN' ? '/admin/overview' : '/member/record');
+        if (user.role === 'ADMIN') {
+          onLoginSuccess('/admin/overview');
+        } else if (user.role === 'FINANCE') {
+          onLoginSuccess('/finance/wallet');
+        } else {
+          onLoginSuccess('/member/record');
+        }
       }
     } catch (err) {
       setError(err.message || 'Invalid username or password');
