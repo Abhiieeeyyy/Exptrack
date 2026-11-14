@@ -33,6 +33,7 @@ export default function Navbar({ activeRoute, onNavigate, onOpenSupabaseModal })
     { id: '/admin/approvals', label: 'Approvals Queue', icon: CheckSquare },
     { id: '/admin/collections', label: 'Collections Ledger', icon: BookOpen },
     { id: '/admin/expenses', label: 'Expense Ledger', icon: Receipt },
+    { id: '/admin/upload', label: 'Record Expense', icon: Upload },
     { id: '/admin/users', label: 'User Accounts', icon: Users },
   ];
 

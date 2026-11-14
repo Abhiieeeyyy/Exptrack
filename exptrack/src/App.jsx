@@ -105,7 +105,14 @@ function MainApp() {
       case '/admin/collections':
         return <AdminCollections key={refreshKey} />;
       case '/admin/expenses':
-        return <AdminExpenses key={refreshKey} />;
+        return <AdminExpenses key={refreshKey} onNavigate={handleNavigate} />;
+      case '/admin/upload':
+        return (
+          <UploadExpense
+            onExpenseSubmitted={handleTriggerRefresh}
+            onNavigateHistory={() => handleNavigate('/admin/expenses')}
+          />
+        );
       case '/admin/users':
         return <AdminUsers key={refreshKey} />;
 

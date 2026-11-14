@@ -27,6 +27,10 @@ import {
   BookOpen,
   ArrowDownLeft,
   Plus,
+  Minus,
+  Pencil,
+  Trash2,
+  X,
   Clock,
   History,
   Building,
@@ -69,9 +73,10 @@ export default function AdminUsers() {
   const [editPassword, setEditPassword] = useState('');
   const [copiedEditPasskey, setCopiedEditPasskey] = useState(false);
 
-  // Credit Money Modal state
+  // Credit Money & Adjustment Modal state (Supports Increase, Decrease & Edit of allocations)
   const [creditModalUser, setCreditModalUser] = useState(null);
   const [creditAmount, setCreditAmount] = useState('');
+  const [creditActionType, setCreditActionType] = useState('INCREASE'); // 'INCREASE' | 'DECREASE'
   const [creditMode, setCreditMode] = useState('BANK_TRANSFER');
   const [creditRef, setCreditRef] = useState('');
   const [creditNotes, setCreditNotes] = useState('');
@@ -79,6 +84,18 @@ export default function AdminUsers() {
   const [creditLoading, setCreditLoading] = useState(false);
   const [creditSaving, setCreditSaving] = useState(false);
   const [creditErrors, setCreditErrors] = useState({});
+
+  // Inline editing of an existing credit entry
+  const [editingCredit, setEditingCredit] = useState(null);
+  const [editCreditForm, setEditCreditForm] = useState({
+    amount: '',
+    payment_mode: 'BANK_TRANSFER',
+    reference_number: '',
+    notes: ''
+  });
+  const [editCreditErrors, setEditCreditErrors] = useState({});
+  const [editCreditSaving, setEditCreditSaving] = useState(false);
+  const [deletingCreditId, setDeletingCreditId] = useState(null);
 
   const [actionLoading, setActionLoading] = useState(false);
   const [errors, setErrors] = useState({});
@@ -133,10 +150,13 @@ export default function AdminUsers() {
   const handleOpenCreditModal = async (u) => {
     setCreditModalUser(u);
     setCreditAmount('');
+    setCreditActionType('INCREASE');
     setCreditMode('BANK_TRANSFER');
     setCreditRef('');
     setCreditNotes('');
     setCreditErrors({});
+    setEditingCredit(null);
+    setEditCreditErrors({});
     setCreditLoading(true);
     try {
       const hist = await api.getCreditHistory({ userId: u.id });
@@ -268,19 +288,20 @@ export default function AdminUsers() {
     }
   };
 
-  const handleAddCredit = async (e) => {
+  const handleAddOrAdjustCredit = async (e) => {
     e.preventDefault();
     setCreditErrors({});
     const num = Number(creditAmount);
     if (!creditAmount || isNaN(num) || num <= 0) {
-      setCreditErrors({ amount: 'Enter a valid credit amount (> ₹0)' });
+      setCreditErrors({ amount: 'Enter a valid amount (> ₹0)' });
       return;
     }
 
     setCreditSaving(true);
     try {
-      await api.addCredit({
+      await api.adjustFinanceCredit({
         userId: creditModalUser.id,
+        adjustmentType: creditActionType,
         amount: num,
         payment_mode: creditMode,
         reference_number: creditRef,
@@ -294,18 +315,96 @@ export default function AdminUsers() {
         origin: { y: 0.6 }
       });
 
-      setSuccessMsg(`Successfully credited ${formatINR(num)} to @${creditModalUser.username}! Available balance updated.`);
-      setCreditModalUser(null);
+      const actionText = creditActionType === 'DECREASE' 
+        ? `Decreased ${formatINR(num)} from` 
+        : `Credited ${formatINR(num)} to`;
+      setSuccessMsg(`Successfully ${actionText} @${creditModalUser.username}! Available balance updated.`);
+
+      // Refresh data
+      setCreditAmount('');
+      setCreditRef('');
+      setCreditNotes('');
+      const hist = await api.getCreditHistory({ userId: creditModalUser.id });
+      setCreditHistory(hist || []);
       await loadUsers();
       setTimeout(() => setSuccessMsg(''), 8000);
     } catch (err) {
       if (err.field) {
         setCreditErrors({ [err.field]: err.message });
       } else {
-        setCreditErrors({ general: err.message || 'Failed to credit money to finance member' });
+        setCreditErrors({ general: err.message || 'Failed to update credit funds for finance manager' });
       }
     } finally {
       setCreditSaving(false);
+    }
+  };
+
+  const handleStartEditCredit = (c) => {
+    setEditingCredit(c);
+    setEditCreditForm({
+      amount: String(Math.abs(Number(c.amount || 0))),
+      payment_mode: c.payment_mode || 'BANK_TRANSFER',
+      reference_number: c.reference_number || '',
+      notes: c.notes || ''
+    });
+    setEditCreditErrors({});
+  };
+
+  const handleSaveEditCredit = async (e) => {
+    e.preventDefault();
+    setEditCreditErrors({});
+    const num = Number(editCreditForm.amount);
+    if (!editCreditForm.amount || isNaN(num) || num <= 0) {
+      setEditCreditErrors({ amount: 'Please enter a valid credit amount (> ₹0)' });
+      return;
+    }
+
+    setEditCreditSaving(true);
+    try {
+      await api.updateCredit(editingCredit.id, {
+        amount: num,
+        payment_mode: editCreditForm.payment_mode,
+        reference_number: editCreditForm.reference_number,
+        notes: editCreditForm.notes
+      });
+
+      setSuccessMsg(`Credit record updated to ${formatINR(num)}! Finance balance refreshed.`);
+      setEditingCredit(null);
+
+      const hist = await api.getCreditHistory({ userId: creditModalUser.id });
+      setCreditHistory(hist || []);
+      await loadUsers();
+      setTimeout(() => setSuccessMsg(''), 6000);
+    } catch (err) {
+      if (err.field) {
+        setEditCreditErrors({ [err.field]: err.message });
+      } else {
+        setEditCreditErrors({ general: err.message || 'Failed to update credit entry' });
+      }
+    } finally {
+      setEditCreditSaving(false);
+    }
+  };
+
+  const handleDeleteCredit = async (creditId, amount) => {
+    const formatted = formatINR(amount);
+    if (!window.confirm(`Are you sure you want to delete this credit allocation of ${formatted}? This will decrease the manager's credited balance by ${formatted}.`)) {
+      return;
+    }
+
+    setDeletingCreditId(creditId);
+    try {
+      await api.deleteCredit(creditId);
+      setSuccessMsg(`Credit allocation of ${formatted} deleted. Balances updated.`);
+      
+      const hist = await api.getCreditHistory({ userId: creditModalUser.id });
+      setCreditHistory(hist || []);
+      await loadUsers();
+      setTimeout(() => setSuccessMsg(''), 6000);
+    } catch (err) {
+      alert(err.message || 'Failed to delete credit allocation');
+    } finally {
+      setDeletingCreditId(null);
     }
   };
 
@@ -533,11 +632,11 @@ export default function AdminUsers() {
                           <button
                             type="button"
                             onClick={() => handleOpenCreditModal(u)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 transition cursor-pointer"
-                            title="Credit money to this finance manager"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 transition cursor-pointer shadow-2xs"
+                            title="Manage, edit, increase or decrease credited funds for this finance manager"
                           >
-                            <Plus className="w-3 h-3" />
-                            <span>Credit Money</span>
+                            <Coins className="w-3.5 h-3.5" />
+                            <span>Manage Credits</span>
                           </button>
                         )}
 
@@ -767,15 +866,18 @@ export default function AdminUsers() {
         </form>
       </Modal>
 
-      {/* Credit Funds Modal - Admin Credits Money to Finance Member */}
+      {/* Manage Credits Modal - Admin can Increase, Decrease, Edit, or Delete Finance Allocations */}
       <Modal
         isOpen={Boolean(creditModalUser)}
-        onClose={() => setCreditModalUser(null)}
-        title="Credit Money to Finance Manager"
-        subtitle={creditModalUser ? `Allocate advance spending money to @${creditModalUser.username}` : ''}
-        maxWidth="max-w-lg"
+        onClose={() => {
+          setCreditModalUser(null);
+          setEditingCredit(null);
+        }}
+        title="Manage Finance Credits & Allocations"
+        subtitle={creditModalUser ? `Increase, decrease, or edit credited spending funds for @${creditModalUser.username}` : ''}
+        maxWidth="max-w-xl"
       >
-        <form onSubmit={handleAddCredit} className="space-y-4">
+        <div className="space-y-4">
           {creditErrors.general && (
             <div className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-xs font-semibold text-rose-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -785,160 +887,378 @@ export default function AdminUsers() {
 
           {/* Current Finance Balance Overview */}
           {creditModalUser && (
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-3 gap-2 text-center">
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-3 gap-2 text-center shadow-2xs">
               <div>
-                <div className="text-[10px] text-slate-500 font-bold uppercase">Credited</div>
-                <div className="text-xs font-bold text-slate-900 mt-0.5">
+                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Credited</div>
+                <div className="text-sm font-extrabold text-slate-900 mt-0.5">
                   {formatINR(financeBalances[creditModalUser.id]?.totalCredited || 0)}
                 </div>
               </div>
               <div className="border-x border-slate-200">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">Debited (Spent)</div>
-                <div className="text-xs font-bold text-slate-900 mt-0.5">
+                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Spent (Debited)</div>
+                <div className="text-sm font-extrabold text-slate-900 mt-0.5">
                   {formatINR(financeBalances[creditModalUser.id]?.totalDebited || 0)}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] text-emerald-700 font-bold uppercase">Available</div>
-                <div className="text-xs font-extrabold text-emerald-600 mt-0.5">
+                <div className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider">Available Balance</div>
+                <div className="text-sm font-extrabold text-emerald-600 mt-0.5">
                   {formatINR(financeBalances[creditModalUser.id]?.availableBalance || 0)}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Amount to Credit */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Credit Amount (INR) <span className="text-rose-500">*</span>
-            </label>
-            <MoneyInput
-              value={creditAmount}
-              onChange={setCreditAmount}
-              placeholder="e.g. 25000"
-              required
-            />
-            {creditErrors.amount && (
-              <p className="text-xs text-rose-600 mt-1 font-medium">{creditErrors.amount}</p>
-            )}
-
-            {/* Quick Chips */}
-            <div className="flex items-center gap-1.5 mt-2">
-              <span className="text-[10px] text-slate-400 font-medium">Quick add:</span>
-              {[5000, 10000, 25000, 50000].map(amt => (
+          {/* If Editing a specific past credit entry */}
+          {editingCredit ? (
+            <form onSubmit={handleSaveEditCredit} className="p-4 bg-emerald-50/40 rounded-xl border border-emerald-300/80 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between pb-2 border-b border-emerald-200/80">
+                <div className="flex items-center gap-2">
+                  <Pencil className="w-3.5 h-3.5 text-emerald-700" />
+                  <span className="text-xs font-bold text-emerald-950">
+                    Edit Credit Allocation (Originally {formatINR(editingCredit.amount)})
+                  </span>
+                </div>
                 <button
-                  key={amt}
                   type="button"
-                  onClick={() => setCreditAmount(String(amt))}
-                  className="px-2 py-0.5 text-[11px] font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                  onClick={() => setEditingCredit(null)}
+                  className="text-xs text-slate-500 hover:text-slate-800 p-1 cursor-pointer"
                 >
-                  +{formatINR(amt)}
+                  <X className="w-4 h-4" />
                 </button>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          {/* Payment Mode */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Disbursement Mode
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                { id: 'BANK_TRANSFER', label: 'Bank / NEFT', icon: Building },
-                { id: 'CASH', label: 'Cash Advance', icon: Banknote },
-                { id: 'UPI', label: 'UPI / QR', icon: CreditCard },
-                { id: 'CHEQUE', label: 'Cheque', icon: Coins },
-              ].map(mode => {
-                const Icon = mode.icon;
-                const isSelected = creditMode === mode.id;
-                return (
+              {editCreditErrors.general && (
+                <p className="text-xs text-rose-600 font-semibold">{editCreditErrors.general}</p>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Adjust Credited Amount (INR) <span className="text-rose-500">*</span>
+                </label>
+                <MoneyInput
+                  value={editCreditForm.amount}
+                  onChange={(amt) => setEditCreditForm(prev => ({ ...prev, amount: amt }))}
+                  placeholder="e.g. 20000"
+                  required
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Change this amount to increase or decrease the manager's credited funds.
+                </p>
+                {editCreditErrors.amount && (
+                  <p className="text-xs text-rose-600 mt-1 font-medium">{editCreditErrors.amount}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Disbursement Mode
+                  </label>
+                  <select
+                    value={editCreditForm.payment_mode}
+                    onChange={(e) => setEditCreditForm(prev => ({ ...prev, payment_mode: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="BANK_TRANSFER">Bank / NEFT</option>
+                    <option value="CASH">Cash Advance</option>
+                    <option value="UPI">UPI / QR</option>
+                    <option value="CHEQUE">Cheque</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Reference / Voucher No
+                  </label>
+                  <input
+                    type="text"
+                    value={editCreditForm.reference_number}
+                    onChange={(e) => setEditCreditForm(prev => ({ ...prev, reference_number: e.target.value }))}
+                    placeholder="e.g. UTR-9823412"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono text-slate-900 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Purpose / Notes
+                </label>
+                <input
+                  type="text"
+                  value={editCreditForm.notes}
+                  onChange={(e) => setEditCreditForm(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="e.g. Adjusted advance budget for festival lights"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-emerald-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingCredit(null)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200/60 rounded-lg transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editCreditSaving}
+                  className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition disabled:opacity-50 cursor-pointer"
+                >
+                  {editCreditSaving ? 'Saving Changes...' : 'Save Allocation Changes'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* Direct Adjustment Form (Increase or Decrease) */
+            <form onSubmit={handleAddOrAdjustCredit} className="space-y-4">
+              {/* Type Switcher: Increase vs Decrease */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Allocation Action Type
+                </label>
+                <div className="grid grid-cols-2 gap-2">
                   <button
-                    key={mode.id}
                     type="button"
-                    onClick={() => setCreditMode(mode.id)}
-                    className={`p-2 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition cursor-pointer ${
-                      isSelected
+                    onClick={() => setCreditActionType('INCREASE')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                      creditActionType === 'INCREASE'
                         ? 'border-emerald-500 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-500/20'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
-                    <span>{mode.label}</span>
+                    <Plus className="w-4 h-4 text-emerald-600" />
+                    <span>+ Increase Credited Funds</span>
                   </button>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Reference / UTR Number */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Reference / UTR / Voucher No <span className="text-[10px] text-slate-400 font-normal lowercase">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={creditRef}
-              onChange={(e) => setCreditRef(e.target.value)}
-              placeholder="e.g. UTR-9823412 or Voucher #14"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
-            />
-          </div>
-
-          {/* Notes / Purpose */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Purpose / Allocation Notes <span className="text-[10px] text-slate-400 font-normal lowercase">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={creditNotes}
-              onChange={(e) => setCreditNotes(e.target.value)}
-              placeholder="e.g. Stage lighting &amp; sound setup advance"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
-            />
-          </div>
-
-          {/* Past Credit History Log */}
-          {creditHistory.length > 0 && (
-            <div className="pt-2 border-t border-slate-100">
-              <div className="text-[11px] font-bold text-slate-600 uppercase mb-1.5 flex items-center justify-between">
-                <span>Recent Credits to this Manager</span>
-                <span className="text-slate-400 lowercase font-normal">{creditHistory.length} total</span>
+                  <button
+                    type="button"
+                    onClick={() => setCreditActionType('DECREASE')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                      creditActionType === 'DECREASE'
+                        ? 'border-rose-500 bg-rose-50 text-rose-900 ring-2 ring-rose-500/20'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Minus className="w-4 h-4 text-rose-600" />
+                    <span>&minus; Decrease Credited Funds</span>
+                  </button>
+                </div>
               </div>
-              <div className="max-h-28 overflow-y-auto space-y-1 pr-1 text-xs">
-                {creditHistory.slice(0, 4).map(c => (
-                  <div key={c.id} className="p-2 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-900">{formatINR(c.amount)} &bull; {c.payment_mode}</div>
-                      <div className="text-[10px] text-slate-500">{c.notes || 'Advance credit'} &bull; {new Date(c.created_at).toLocaleDateString('en-IN')}</div>
-                    </div>
-                    <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                      Credited
-                    </span>
-                  </div>
-                ))}
+
+              {creditActionType === 'DECREASE' && (
+                <div className="p-3 bg-rose-50/70 border border-rose-200 rounded-xl text-xs text-rose-800 leading-snug">
+                  <span className="font-bold block mb-0.5">⚠️ Fund Deduction Notice:</span>
+                  This will deduct from @{creditModalUser?.username}'s credited advance and immediately decrease their available wallet balance.
+                </div>
+              )}
+
+              {/* Amount */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  {creditActionType === 'DECREASE' ? 'Deduction Amount (INR)' : 'Credit Amount (INR)'} <span className="text-rose-500">*</span>
+                </label>
+                <MoneyInput
+                  value={creditAmount}
+                  onChange={setCreditAmount}
+                  placeholder="e.g. 25000"
+                  required
+                />
+                {creditErrors.amount && (
+                  <p className="text-xs text-rose-600 mt-1 font-medium">{creditErrors.amount}</p>
+                )}
+
+                {/* Quick Chips */}
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Quick add:</span>
+                  {[5000, 10000, 25000, 50000].map(amt => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setCreditAmount(String(amt))}
+                      className="px-2 py-0.5 text-[11px] font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                    >
+                      {creditActionType === 'DECREASE' ? '-' : '+'}{formatINR(amt)}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+
+              {/* Payment Mode */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Disbursement Mode
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'BANK_TRANSFER', label: 'Bank / NEFT', icon: Building },
+                    { id: 'CASH', label: 'Cash Advance', icon: Banknote },
+                    { id: 'UPI', label: 'UPI / QR', icon: CreditCard },
+                    { id: 'CHEQUE', label: 'Cheque', icon: Coins },
+                  ].map(mode => {
+                    const Icon = mode.icon;
+                    const isSelected = creditMode === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setCreditMode(mode.id)}
+                        className={`p-2 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition cursor-pointer ${
+                          isSelected
+                            ? 'border-emerald-500 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{mode.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Reference / UTR Number */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Reference / UTR / Voucher No <span className="text-[10px] text-slate-400 font-normal lowercase">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={creditRef}
+                  onChange={(e) => setCreditRef(e.target.value)}
+                  placeholder="e.g. UTR-9823412 or Voucher #14"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Notes / Purpose */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Purpose / Allocation Notes <span className="text-[10px] text-slate-400 font-normal lowercase">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={creditNotes}
+                  onChange={(e) => setCreditNotes(e.target.value)}
+                  placeholder={creditActionType === 'DECREASE' ? 'e.g. Return of unspent electrical advance' : 'e.g. Stage lighting setup advance'}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-900 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="submit"
+                  disabled={creditSaving}
+                  className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl shadow-xs transition disabled:opacity-50 cursor-pointer ${
+                    creditActionType === 'DECREASE'
+                      ? 'bg-rose-600 hover:bg-rose-700'
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
+                >
+                  {creditSaving ? 'Processing...' : (
+                    creditActionType === 'DECREASE' 
+                      ? `Deduct ${creditAmount ? formatINR(creditAmount) : 'Funds'}`
+                      : `Credit ${creditAmount ? formatINR(creditAmount) : 'Money'}`
+                  )}
+                </button>
+              </div>
+            </form>
           )}
 
-          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+          {/* Past Credit History Log with EDIT and DELETE controls */}
+          <div className="pt-3 border-t border-slate-200">
+            <div className="text-[11px] font-bold text-slate-700 uppercase mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5 text-slate-400" />
+                <span>Credit Allocations &amp; Direct Edits</span>
+              </span>
+              <span className="text-slate-400 lowercase font-normal">{creditHistory.length} total entries</span>
+            </div>
+
+            {creditLoading ? (
+              <div className="py-6 text-center text-slate-400 text-xs">Loading credits...</div>
+            ) : creditHistory.length === 0 ? (
+              <div className="py-6 text-center text-slate-400 text-xs bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                No credit allocations found for this manager yet.
+              </div>
+            ) : (
+              <div className="max-h-56 overflow-y-auto space-y-2 pr-1 text-xs">
+                {creditHistory.map(c => {
+                  const isNegative = Number(c.amount) < 0;
+                  const absAmt = Math.abs(Number(c.amount));
+                  const isCurrentEditing = editingCredit?.id === c.id;
+
+                  return (
+                    <div 
+                      key={c.id} 
+                      className={`p-3 rounded-xl border transition flex items-center justify-between gap-3 ${
+                        isCurrentEditing 
+                          ? 'bg-emerald-50 border-emerald-300' 
+                          : 'bg-slate-50/80 hover:bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="space-y-0.5 flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`font-extrabold ${isNegative ? 'text-rose-700' : 'text-slate-900'}`}>
+                            {isNegative ? '-' : '+'} {formatINR(absAmt)}
+                          </span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-purple-100 text-purple-800">
+                            {c.payment_mode || 'TRANSFER'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-600 truncate">
+                          {c.notes || 'Advance credit'}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {new Date(c.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {c.reference_number && ` &bull; Ref: ${c.reference_number}`}
+                          {c.credited_by_name && ` &bull; By ${c.credited_by_name}`}
+                        </div>
+                      </div>
+
+                      {/* Action buttons: Edit and Delete */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditCredit(c)}
+                          className="p-1.5 rounded-lg text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 border border-slate-200 bg-white transition cursor-pointer shadow-2xs"
+                          title="Edit this credited amount or details"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={deletingCreditId === c.id}
+                          onClick={() => handleDeleteCredit(c.id, absAmt)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 bg-white transition cursor-pointer shadow-2xs disabled:opacity-50"
+                          title="Delete this credit allocation"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-end">
             <button
               type="button"
-              onClick={() => setCreditModalUser(null)}
-              className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+              onClick={() => {
+                setCreditModalUser(null);
+                setEditingCredit(null);
+              }}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={creditSaving}
-              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition disabled:opacity-50 cursor-pointer"
-            >
-              {creditSaving ? 'Processing Credit...' : `Credit ${creditAmount ? formatINR(creditAmount) : 'Money'}`}
+              Close
             </button>
           </div>
-        </form>
+        </div>
       </Modal>
 
       {/* Edit User Modal */}

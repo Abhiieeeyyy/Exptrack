@@ -17,7 +17,8 @@ import {
   BarChart3,
   ExternalLink,
   ChevronRight,
-  Coins
+  Coins,
+  Upload
 } from 'lucide-react';
 import { formatINR, formatINRCompact } from '../../lib/money';
 
@@ -73,13 +74,21 @@ export default function AdminOverview({ onNavigate }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={fetchMetrics}
             className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-2xs cursor-pointer"
           >
             Refresh Ledger
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('/admin/upload')}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl shadow-xs transition cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Record Expense</span>
           </button>
           <button
             type="button"

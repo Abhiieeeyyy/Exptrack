@@ -1,6 +1,30 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
+import { compressImage } from '../lib/imageCompression.js';
 
-const LOCAL_DATA_VERSION = '3';
+const LOCAL_DATA_VERSION = '5';
+
+/** True for heavy inline Base64 / data-URL receipts that slow down lists & localStorage. */
+function isHeavyBillPayload(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.startsWith('data:') || url.length > 2048;
+}
+
+/** Keep list/cache payloads light: preserve http(s) storage URLs only. */
+function lightenExpense(item) {
+  if (!item) return item;
+  const url = item.bill_image_url;
+  const hasBill = Boolean(url);
+  const keepUrl = url && !isHeavyBillPayload(url) ? url : null;
+  return {
+    ...item,
+    has_bill_image: hasBill || Boolean(item.has_bill_image),
+    bill_image_url: keepUrl
+  };
+}
+
+function lightenExpenses(list) {
+  return (list || []).map(lightenExpense);
+}
 
 const INITIAL_USERS = [
   {
@@ -111,6 +135,9 @@ function purgeStaleLocalData() {
 purgeStaleLocalData();
 
 async function purgeSeededRemoteUsers() {
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('fecms_seed_purged') === 'true') {
+    return;
+  }
   if (!isSupabaseConfigured() || !supabase) return;
   try {
     const { data: seedUsers, error } = await supabase
@@ -118,12 +145,16 @@ async function purgeSeededRemoteUsers() {
       .select('id, username, role')
       .in('username', SEEDED_MEMBER_USERNAMES);
 
-    if (error || !seedUsers?.length) return;
+    if (error || !seedUsers?.length) {
+      if (typeof localStorage !== 'undefined') localStorage.setItem('fecms_seed_purged', 'true');
+      return;
+    }
 
     const ids = seedUsers.map((u) => u.id);
     await supabase.from('expenses').delete().in('submitted_by_user_id', ids);
     await supabase.from('collections').delete().in('collected_by_user_id', ids);
     await supabase.from('users').delete().in('id', ids);
+    if (typeof localStorage !== 'undefined') localStorage.setItem('fecms_seed_purged', 'true');
   } catch (err) {
     console.warn('Could not purge seeded remote users:', err);
   }
@@ -671,6 +702,54 @@ export const api = {
     return cat;
   },
 
+  async uploadBillReceipt(file) {
+    if (!file) return null;
+    try {
+      const compressed = await compressImage(file, { maxWidth: 1200, maxHeight: 1200, quality: 0.75 });
+      
+      // Try uploading to Supabase Storage bills bucket if online & configured
+      if (isSupabaseConfigured() && supabase) {
+        try {
+          const ext = file.name ? file.name.split('.').pop() : 'jpg';
+          const fileName = `receipt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+          const filePath = `${fileName}`;
+          
+          const uploadPayload = compressed?.blob || file;
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from('bills')
+            .upload(filePath, uploadPayload, {
+              contentType: file.type || 'image/jpeg',
+              upsert: true
+            });
+
+          if (!uploadErr && uploadData) {
+            const { data: urlData } = supabase.storage
+              .from('bills')
+              .getPublicUrl(filePath);
+            if (urlData?.publicUrl) {
+              return urlData.publicUrl;
+            }
+          } else if (uploadErr) {
+            console.warn('Supabase storage upload error, fallback to compressed image:', uploadErr.message);
+          }
+        } catch (storageErr) {
+          console.warn('Supabase storage failed, fallback to compressed data URL:', storageErr);
+        }
+      }
+
+      // Return the compressed data URL (~50KB-80KB instead of 5MB-10MB!)
+      return compressed?.dataUrl || null;
+    } catch (err) {
+      console.warn('Image compression/upload failed, falling back to FileReader:', err);
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+    }
+  },
+
   async createExpense(expenseData) {
     const { category, amount, description, bill_image_url } = expenseData;
 
@@ -689,6 +768,13 @@ export const api = {
 
     const cleanDescription = (description || '').trim();
 
+    // Check if submitted by Admin or flagged for Auto-Approval
+    const isAutoApprove = Boolean(expenseData.autoApprove || expenseData.isAdmin);
+    const initialStatus = isAutoApprove ? 'APPROVED' : 'PENDING';
+    const reviewerId = isAutoApprove ? expenseData.submitted_by_user_id : null;
+    const reviewerName = isAutoApprove ? (expenseData.submitter_name || 'Administrator') : null;
+    const reviewedAt = isAutoApprove ? new Date().toISOString() : null;
+
     if (isSupabaseConfigured()) {
       try {
         const { data, error } = await supabase
@@ -699,13 +785,38 @@ export const api = {
             amount: numAmount,
             description: cleanDescription,
             bill_image_url: bill_image_url || null,
-            status: 'PENDING'
+            status: initialStatus,
+            reviewed_by: reviewerId,
+            reviewed_at: reviewedAt,
+            rejection_reason: null
           }])
-          .select()
+          .select(`
+            *,
+            submitter:submitted_by_user_id (id, full_name, username),
+            reviewer:reviewed_by (id, full_name, username)
+          `)
           .single();
 
         if (error) throw error;
-        return data;
+
+        const formatted = lightenExpense({
+          ...data,
+          submitter_name: data.submitter ? (data.submitter.full_name || data.submitter.username) : (expenseData.submitter_name || (isAutoApprove ? 'Administrator' : 'Member')),
+          reviewer_name: data.reviewer ? (data.reviewer.full_name || data.reviewer.username) : reviewerName,
+          has_bill_image: Boolean(bill_image_url || data.bill_image_url)
+        });
+
+        // Cache only a light copy — never shove Base64 receipts into localStorage
+        const expenses = getStore('expenses', INITIAL_EXPENSES);
+        expenses.unshift(formatted);
+        setStore('expenses', lightenExpenses(expenses));
+
+        // Return full record for the submitter UI (may include storage URL or compressed data URL)
+        return {
+          ...formatted,
+          bill_image_url: data.bill_image_url || bill_image_url || null,
+          has_bill_image: Boolean(data.bill_image_url || bill_image_url)
+        };
       } catch (err) {
         if (err.field) throw err;
         console.warn('Supabase fallback for expense creation:', err);
@@ -716,22 +827,58 @@ export const api = {
     const newExpense = {
       id: 'exp-' + Date.now(),
       submitted_by_user_id: expenseData.submitted_by_user_id,
-      submitter_name: expenseData.submitter_name || 'Member',
+      submitter_name: expenseData.submitter_name || (isAutoApprove ? 'Administrator' : 'Member'),
       category: category,
       amount: numAmount,
       description: cleanDescription,
       bill_image_url: bill_image_url || null,
-      status: 'PENDING',
+      has_bill_image: Boolean(bill_image_url),
+      status: initialStatus,
       rejection_reason: null,
-      reviewed_by: null,
-      reviewer_name: null,
-      reviewed_at: null,
+      reviewed_by: reviewerId,
+      reviewer_name: reviewerName,
+      reviewed_at: reviewedAt,
       created_at: new Date().toISOString()
     };
 
-    expenses.unshift(newExpense);
-    setStore('expenses', expenses);
+    // Persist light copy; return full for immediate UI
+    expenses.unshift(lightenExpense(newExpense));
+    setStore('expenses', lightenExpenses(expenses));
     return newExpense;
+  },
+
+  /** Fetch a single expense including bill_image_url (for receipt preview). */
+  async getExpenseById(expenseId) {
+    if (!expenseId) return null;
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('expenses')
+          .select(`
+            *,
+            submitter:submitted_by_user_id (id, full_name, username),
+            reviewer:reviewed_by (id, full_name, username)
+          `)
+          .eq('id', expenseId)
+          .single();
+
+        if (!error && data) {
+          return {
+            ...data,
+            has_bill_image: Boolean(data.bill_image_url),
+            submitter_name: data.submitter ? (data.submitter.full_name || data.submitter.username) : 'Member',
+            reviewer_name: data.reviewer ? (data.reviewer.full_name || data.reviewer.username) : null
+          };
+        }
+      } catch (err) {
+        console.warn('Supabase getExpenseById error:', err);
+      }
+    }
+
+    const expenses = getStore('expenses', INITIAL_EXPENSES);
+    const found = expenses.find(e => String(e.id) === String(expenseId));
+    return found ? { ...found, has_bill_image: Boolean(found.bill_image_url || found.has_bill_image) } : null;
   },
 
   async updateExpense(expenseId, expenseData) {
@@ -797,8 +944,19 @@ export const api = {
 
     if (isSupabaseConfigured()) {
       try {
+        // Lightweight list projection — intentionally omits bill_image_url (can be multi-MB Base64).
+        // Receipt bytes are loaded on demand via getExpenseById().
         let query = supabase.from('expenses').select(`
-          *,
+          id,
+          submitted_by_user_id,
+          category,
+          amount,
+          description,
+          status,
+          rejection_reason,
+          reviewed_by,
+          reviewed_at,
+          created_at,
           submitter:submitted_by_user_id (id, full_name, username),
           reviewer:reviewed_by (id, full_name, username)
         `).order('created_at', { ascending: false });
@@ -828,6 +986,9 @@ export const api = {
           usedSupabase = true;
           result = data.map(item => ({
             ...item,
+            bill_image_url: null,
+            // Unknown until preview fetch; UI still offers View and loads on demand
+            has_bill_image: true,
             submitter_name: item.submitter ? (item.submitter.full_name || item.submitter.username) : 'Member',
             reviewer_name: item.reviewer ? (item.reviewer.full_name || item.reviewer.username) : null
           }));
@@ -838,7 +999,7 @@ export const api = {
     }
 
     if (!usedSupabase) {
-      let expenses = getStore('expenses', INITIAL_EXPENSES);
+      let expenses = lightenExpenses(getStore('expenses', INITIAL_EXPENSES));
 
       if (memberId) {
         expenses = expenses.filter(e => e.submitted_by_user_id === memberId);
@@ -904,7 +1065,7 @@ export const api = {
           .single();
 
         if (error) throw error;
-        return data;
+        return lightenExpense(data);
       } catch (err) {
         console.warn('Supabase fallback on approveExpense:', err);
       }
@@ -920,8 +1081,8 @@ export const api = {
     expenses[idx].reviewer_name = reviewerUser.full_name || reviewerUser.username;
     expenses[idx].reviewed_at = new Date().toISOString();
 
-    setStore('expenses', expenses);
-    return expenses[idx];
+    setStore('expenses', lightenExpenses(expenses));
+    return lightenExpense(expenses[idx]);
   },
 
   async rejectExpense(expenseId, reason, reviewerUser) {
@@ -944,7 +1105,7 @@ export const api = {
           .single();
 
         if (error) throw error;
-        return data;
+        return lightenExpense(data);
       } catch (err) {
         console.warn('Supabase fallback on rejectExpense:', err);
       }
@@ -960,16 +1121,58 @@ export const api = {
     expenses[idx].reviewer_name = reviewerUser.full_name || reviewerUser.username;
     expenses[idx].reviewed_at = new Date().toISOString();
 
-    setStore('expenses', expenses);
-    return expenses[idx];
+    setStore('expenses', lightenExpenses(expenses));
+    return lightenExpense(expenses[idx]);
   },
 
   // --------------------------------------------------------------------------
   // ADMIN METRICS (Section 6 Business Rules: Net Balance = Total Income - APPROVED Expenses)
+  // High-performance lightweight projection (never loads heavy Base64 images)
   // --------------------------------------------------------------------------
   async getMetrics() {
-    const collections = await this.getCollections();
-    const expenses = await this.getExpenses();
+    let collections = [];
+    let expenses = [];
+    let allCredits = [];
+    let usedFastQueries = false;
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        // Fast lightweight projections: scalar columns only (no bill images)
+        const [colsRes, expsRes, credsRes] = await Promise.all([
+          supabase.from('collections').select(`
+            id, amount, payment_status, payment_mode, notes, created_at,
+            receipt_book_number, donor_name,
+            users:collected_by_user_id (full_name, username)
+          `).order('created_at', { ascending: false }),
+          supabase.from('expenses').select(`
+            id, category, amount, status, description, created_at
+          `).order('created_at', { ascending: false }),
+          supabase.from('finance_credits').select('id, amount, created_at')
+        ]);
+
+        if (!colsRes.error && !expsRes.error && !credsRes.error) {
+          collections = (colsRes.data || []).map(item => {
+            const isPending = (item.notes && item.notes.includes('[PAYMENT_PENDING]')) || item.payment_status === 'PENDING';
+            return {
+              ...item,
+              payment_status: isPending ? 'PENDING' : 'PAID',
+              collector_name: item.users ? (item.users.full_name || item.users.username) : 'Member'
+            };
+          });
+          expenses = expsRes.data || [];
+          allCredits = credsRes.data || [];
+          usedFastQueries = true;
+        }
+      } catch (err) {
+        console.warn('Supabase fast metrics query error, fallback:', err);
+      }
+    }
+
+    if (!usedFastQueries) {
+      collections = await this.getCollections();
+      expenses = await this.getExpenses();
+      allCredits = await this.getCreditHistory();
+    }
 
     // 1. Total Income & Collections breakdown (Received vs Pending Payment)
     const paidCollections = collections.filter(c => c.payment_status !== 'PENDING');
@@ -1008,7 +1211,6 @@ export const api = {
     });
 
     // 8. Finance Team Allocation totals
-    const allCredits = await this.getCreditHistory();
     const totalCreditedToFinance = allCredits.reduce((sum, c) => sum + Number(c.amount || 0), 0);
     const totalDebitedByFinance = totalApprovedExpenses;
     const unspentFinanceBalance = Math.max(0, totalCreditedToFinance - totalDebitedByFinance);
@@ -1330,8 +1532,8 @@ export const api = {
     if (!userId) {
       throw { field: 'userId', message: 'Finance team member must be selected' };
     }
-    if (isNaN(numAmount) || numAmount <= 0) {
-      throw { field: 'amount', message: 'Credit amount must be greater than zero' };
+    if (isNaN(numAmount) || numAmount === 0) {
+      throw { field: 'amount', message: 'Credit amount must not be zero' };
     }
 
     const cleanRef = (reference_number || '').trim();
@@ -1364,9 +1566,12 @@ export const api = {
             ...data,
             credited_by_name: data.admin?.full_name || data.admin?.username || adminName
           };
+        } else if (error) {
+          throw error;
         }
       } catch (err) {
-        console.warn('Supabase addCredit fallback to local store:', err);
+        if (err.field) throw err;
+        console.warn('Supabase addCredit fallback to local store:', err.message || err);
       }
     }
 
@@ -1389,6 +1594,134 @@ export const api = {
     setStore('finance_credits', localCredits);
 
     return createdRecord;
+  },
+
+  async updateCredit(creditId, creditData) {
+    if (!creditId) throw { field: 'creditId', message: 'Credit ID is required' };
+    const numAmount = Number(creditData.amount);
+    if (isNaN(numAmount) || numAmount === 0) {
+      throw { field: 'amount', message: 'Credited amount must not be zero' };
+    }
+
+    const cleanRef = (creditData.reference_number || '').trim();
+    const cleanNotes = (creditData.notes || '').trim();
+    const cleanMode = creditData.payment_mode || 'BANK_TRANSFER';
+
+    let updatedRecord = null;
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('finance_credits')
+          .update({
+            amount: numAmount,
+            payment_mode: cleanMode,
+            reference_number: cleanRef,
+            notes: cleanNotes
+          })
+          .eq('id', creditId)
+          .select(`
+            *,
+            admin:credited_by (id, full_name, username)
+          `)
+          .single();
+
+        if (!error && data) {
+          updatedRecord = {
+            ...data,
+            credited_by_name: data.admin?.full_name || data.admin?.username || 'Administrator'
+          };
+        } else if (error) {
+          throw error;
+        }
+      } catch (err) {
+        if (err.field) throw err;
+        console.warn('Supabase updateCredit fallback:', err.message || err);
+      }
+    }
+
+    const localCredits = getStore('finance_credits', []);
+    const idx = localCredits.findIndex(c => c.id === creditId);
+    if (idx !== -1) {
+      localCredits[idx] = {
+        ...localCredits[idx],
+        amount: numAmount,
+        payment_mode: cleanMode,
+        reference_number: cleanRef,
+        notes: cleanNotes,
+        updated_at: new Date().toISOString()
+      };
+      if (!updatedRecord) updatedRecord = localCredits[idx];
+      setStore('finance_credits', localCredits);
+    }
+
+    if (!updatedRecord) {
+      throw new Error('Credit record not found');
+    }
+
+    return updatedRecord;
+  },
+
+  async deleteCredit(creditId) {
+    if (!creditId) throw new Error('Credit ID is required for deletion');
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { error } = await supabase
+          .from('finance_credits')
+          .delete()
+          .eq('id', creditId);
+
+        if (error) throw error;
+      } catch (err) {
+        console.warn('Supabase deleteCredit fallback:', err.message || err);
+      }
+    }
+
+    const localCredits = getStore('finance_credits', []);
+    const filtered = localCredits.filter(c => c.id !== creditId);
+    setStore('finance_credits', filtered);
+    return true;
+  },
+
+  async adjustFinanceCredit({ userId, adjustmentType = 'INCREASE', amount, payment_mode = 'BANK_TRANSFER', reference_number = '', notes = '', adminUser }) {
+    const rawNum = Math.abs(Number(amount));
+    if (!userId) throw { field: 'userId', message: 'Finance team member must be selected' };
+    if (isNaN(rawNum) || rawNum <= 0) throw { field: 'amount', message: 'Amount must be greater than zero' };
+
+    const effectiveAmount = adjustmentType === 'DECREASE' ? -rawNum : rawNum;
+    const cleanNotes = notes ? notes.trim() : (adjustmentType === 'DECREASE' ? 'Credit Reduction Adjustment' : 'Fund Top-Up Allocation');
+
+    try {
+      return await this.addCredit({
+        userId,
+        amount: effectiveAmount,
+        payment_mode,
+        reference_number,
+        notes: cleanNotes,
+        adminUser
+      });
+    } catch (err) {
+      // If Postgres check constraint rejects negative amount:
+      if (adjustmentType === 'DECREASE') {
+        const userCredits = await this.getCreditHistory({ userId });
+        if (userCredits.length > 0) {
+          const latest = userCredits[0];
+          const newAmt = Math.max(0, Number(latest.amount) - rawNum);
+          if (newAmt === 0) {
+            await this.deleteCredit(latest.id);
+            return { id: latest.id, deleted: true, adjustedAmount: rawNum };
+          }
+          return await this.updateCredit(latest.id, {
+            amount: newAmt,
+            payment_mode: latest.payment_mode,
+            reference_number: latest.reference_number,
+            notes: `${latest.notes || ''} [Reduced: -₹${rawNum}]`.trim()
+          });
+        }
+      }
+      throw err;
+    }
   },
 
   async getFinanceMemberBalance(userId) {
@@ -1427,19 +1760,61 @@ export const api = {
     };
   },
 
+  // High-performance batch loader: eliminates N+1 database queries!
   async getAllFinanceBalances() {
     const users = await this.getUsers();
     const financeUsers = users.filter(u => u.role === 'FINANCE');
+    if (financeUsers.length === 0) return [];
 
-    const balances = await Promise.all(
-      financeUsers.map(async (u) => {
-        const bal = await this.getFinanceMemberBalance(u.id);
-        return {
-          user: u,
-          ...bal
-        };
-      })
-    );
+    // Fetch credits and expenses in 2 single batch queries instead of 2*N queries
+    const [allCredits, allExpenses] = await Promise.all([
+      this.getCreditHistory(),
+      this.getExpenses()
+    ]);
+
+    // Group credits and expenses by user_id in an O(1) hash map
+    const creditsByUser = {};
+    const expensesByUser = {};
+
+    allCredits.forEach(c => {
+      if (!creditsByUser[c.user_id]) creditsByUser[c.user_id] = [];
+      creditsByUser[c.user_id].push(c);
+    });
+
+    allExpenses.forEach(e => {
+      if (!expensesByUser[e.submitted_by_user_id]) expensesByUser[e.submitted_by_user_id] = [];
+      expensesByUser[e.submitted_by_user_id].push(e);
+    });
+
+    const balances = financeUsers.map(u => {
+      const credits = creditsByUser[u.id] || [];
+      const expenses = expensesByUser[u.id] || [];
+
+      const totalCredited = credits.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+      const approvedExpenses = expenses.filter(e => e.status === 'APPROVED');
+      const totalDebited = approvedExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+      const pendingExpenses = expenses.filter(e => e.status === 'PENDING');
+      const pendingBillsAmount = pendingExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+      const rejectedExpenses = expenses.filter(e => e.status === 'REJECTED');
+      const availableBalance = totalCredited - totalDebited;
+
+      return {
+        user: u,
+        userId: u.id,
+        totalCredited,
+        totalDebited,
+        availableBalance,
+        pendingBillsAmount,
+        pendingBillsCount: pendingExpenses.length,
+        approvedBillsCount: approvedExpenses.length,
+        rejectedBillsCount: rejectedExpenses.length,
+        recentCredits: credits.slice(0, 5),
+        recentExpenses: expenses.slice(0, 5),
+        creditsList: credits,
+        expensesList: expenses
+      };
+    });
 
     return balances;
   },

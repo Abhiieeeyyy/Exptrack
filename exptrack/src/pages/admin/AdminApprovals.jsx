@@ -31,11 +31,26 @@ export default function AdminApprovals({ onApprovedOrRejected }) {
 
   // Modals state
   const [previewItem, setPreviewItem] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [rejectItem, setRejectItem] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successToast, setSuccessToast] = useState('');
+
+  const handlePreviewItem = async (expense) => {
+    setPreviewItem(expense);
+    if (expense?.bill_image_url) return;
+    setPreviewLoading(true);
+    try {
+      const full = await api.getExpenseById(expense.id);
+      if (full) setPreviewItem(full);
+    } catch (err) {
+      console.warn('Could not load bill receipt:', err);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
 
   const loadPendingQueue = async () => {
     setLoading(true);
@@ -256,18 +271,14 @@ export default function AdminApprovals({ onApprovedOrRejected }) {
                       </td>
 
                       <td className="py-4 px-4">
-                        {expense.bill_image_url ? (
-                          <button
-                            type="button"
-                            onClick={() => setPreviewItem(expense)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 transition cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5 text-slate-500" />
-                            <span>View Receipt</span>
-                          </button>
-                        ) : (
-                          <span className="text-slate-400 italic">No file attached</span>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewItem(expense)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 transition cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-slate-500" />
+                          <span>View Receipt</span>
+                        </button>
                       </td>
 
                       <td className="py-4 px-4 text-slate-500 whitespace-nowrap">
@@ -357,12 +368,18 @@ export default function AdminApprovals({ onApprovedOrRejected }) {
               {previewItem.description || <span className="text-slate-400 italic">No description provided</span>}
             </div>
 
-            <div className="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center p-3 border border-slate-800 max-h-[480px]">
-              <img
-                src={previewItem.bill_image_url}
-                alt="Bill Receipt Document"
-                className="max-h-[450px] w-auto object-contain rounded"
-              />
+            <div className="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center p-3 border border-slate-800 max-h-[480px] min-h-[120px]">
+              {previewLoading ? (
+                <span className="text-xs text-slate-400 py-8">Loading receipt…</span>
+              ) : previewItem.bill_image_url ? (
+                <img
+                  src={previewItem.bill_image_url}
+                  alt="Bill Receipt Document"
+                  className="max-h-[450px] w-auto object-contain rounded"
+                />
+              ) : (
+                <span className="text-xs text-slate-400 py-8">No receipt attached</span>
+              )}
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between">

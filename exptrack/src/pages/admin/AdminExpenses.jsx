@@ -17,11 +17,13 @@ import {
   XCircle,
   FileText,
   Calendar,
-  Wallet
+  Wallet,
+  Upload,
+  Loader2
 } from 'lucide-react';
 import { formatINR } from '../../lib/money';
 
-export default function AdminExpenses() {
+export default function AdminExpenses({ onNavigate }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -37,6 +39,21 @@ export default function AdminExpenses() {
   const ITEMS_PER_PAGE = 25;
 
   const [previewExpense, setPreviewExpense] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const handlePreviewExpense = async (exp) => {
+    setPreviewExpense(exp);
+    if (exp?.bill_image_url) return;
+    setPreviewLoading(true);
+    try {
+      const full = await api.getExpenseById(exp.id);
+      if (full) setPreviewExpense(full);
+    } catch (err) {
+      console.warn('Could not load bill receipt:', err);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
 
   const loadExpenses = async () => {
     setLoading(true);
@@ -145,6 +162,18 @@ export default function AdminExpenses() {
             <div className="text-base font-extrabold text-white">{formatINR(totalApproved)}</div>
             <div className="text-[10px] text-emerald-400">{approvedExpenses.length} Approved Bills</div>
           </div>
+
+          {onNavigate && (
+            <button
+              type="button"
+              onClick={() => onNavigate('/admin/upload')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl shadow-xs transition cursor-pointer"
+              title="Record an expense in Admin name — auto-approved"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Record Expense</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -316,18 +345,14 @@ export default function AdminExpenses() {
                       })}
                     </td>
                     <td className="py-3.5 px-4 text-right">
-                      {exp.bill_image_url ? (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewExpense(exp)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md border border-slate-200 transition cursor-pointer"
-                        >
-                          <Eye className="w-3 h-3 text-slate-500" />
-                          <span>View</span>
-                        </button>
-                      ) : (
-                        <span className="text-slate-400 text-[11px] italic">No document</span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handlePreviewExpense(exp)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md border border-slate-200 transition cursor-pointer"
+                      >
+                        <Eye className="w-3 h-3 text-slate-500" />
+                        <span>View</span>
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -442,7 +467,12 @@ export default function AdminExpenses() {
               </div>
             )}
 
-            {previewExpense.bill_image_url ? (
+            {previewLoading ? (
+              <div className="py-10 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200 text-xs flex flex-col items-center justify-center gap-2">
+                <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+                <span>Loading receipt…</span>
+              </div>
+            ) : previewExpense.bill_image_url ? (
               <div className="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center p-2 border border-slate-800 max-h-[450px]">
                 <img
                   src={previewExpense.bill_image_url}

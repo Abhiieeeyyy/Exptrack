@@ -30,6 +30,21 @@ export default function FinanceBillsHistory({ onNavigate }) {
 
   // Preview Modal
   const [previewExpense, setPreviewExpense] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const handlePreviewExpense = async (exp) => {
+    setPreviewExpense(exp);
+    if (exp?.bill_image_url) return;
+    setPreviewLoading(true);
+    try {
+      const full = await api.getExpenseById(exp.id);
+      if (full) setPreviewExpense(full);
+    } catch (err) {
+      console.warn('Could not load bill receipt:', err);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
 
   // Edit Expense Modal (Pending only)
   const [editingExpense, setEditingExpense] = useState(null);
@@ -299,16 +314,14 @@ export default function FinanceBillsHistory({ onNavigate }) {
                         </button>
                       )}
 
-                      {exp.bill_image_url && (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewExpense(exp)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md border border-emerald-200 transition cursor-pointer"
-                        >
-                          <Eye className="w-3 h-3" />
-                          <span>Receipt</span>
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handlePreviewExpense(exp)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md border border-emerald-200 transition cursor-pointer"
+                      >
+                        <Eye className="w-3 h-3" />
+                        <span>Receipt</span>
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -414,12 +427,18 @@ export default function FinanceBillsHistory({ onNavigate }) {
               </span>
             </div>
 
-            <div className="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center p-2 border border-slate-800 max-h-[450px]">
-              <img
-                src={previewExpense.bill_image_url}
-                alt="Bill Receipt"
-                className="max-h-[420px] w-auto object-contain rounded"
-              />
+            <div className="rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center p-2 border border-slate-800 max-h-[450px] min-h-[120px]">
+              {previewLoading ? (
+                <span className="text-xs text-slate-400 py-8">Loading receipt…</span>
+              ) : previewExpense.bill_image_url ? (
+                <img
+                  src={previewExpense.bill_image_url}
+                  alt="Bill Receipt"
+                  className="max-h-[420px] w-auto object-contain rounded"
+                />
+              ) : (
+                <span className="text-xs text-slate-400 py-8">No receipt attached</span>
+              )}
             </div>
 
             {previewExpense.rejection_reason && (

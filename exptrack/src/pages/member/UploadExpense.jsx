@@ -19,12 +19,13 @@ import {
   Tag,
   Wallet,
   Coins,
-  ArrowDownLeft
+  ArrowDownLeft,
+  ShieldCheck
 } from 'lucide-react';
 import { formatINR } from '../../lib/money';
 
 export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory }) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const fileInputRef = useRef(null);
 
   const [availableCategories, setAvailableCategories] = useState(() => api.getExpenseCategories());
@@ -33,6 +34,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
   
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
   const [fileName, setFileName] = useState('');
   const [fileSizeStr, setFileSizeStr] = useState('');
@@ -43,7 +45,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
   const [successExpense, setSuccessExpense] = useState(null);
 
   const loadWallet = async () => {
-    if (user?.id) {
+    if (user?.id && !isAdmin) {
       try {
         const bal = await api.getFinanceMemberBalance(user.id);
         setWalletData(bal);
@@ -55,8 +57,10 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
 
   useEffect(() => {
     setAvailableCategories(api.getExpenseCategories());
-    loadWallet();
-  }, [user]);
+    if (!isAdmin) {
+      loadWallet();
+    }
+  }, [user, isAdmin]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -69,6 +73,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
       return;
     }
 
+    setSelectedFile(file);
     setFileName(file.name);
     setFileSizeStr((file.size / (1024 * 1024)).toFixed(2) + ' MB');
     setErrors(prev => {
@@ -77,7 +82,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
       return next;
     });
 
-    // Read preview
+    // Generate local preview
     const reader = new FileReader();
     reader.onload = () => {
       setFilePreview(reader.result);
@@ -86,6 +91,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
   };
 
   const handleRemoveFile = () => {
+    setSelectedFile(null);
     setFilePreview(null);
     setFileName('');
     setFileSizeStr('');
@@ -125,13 +131,21 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
       : selectedCategoryOption;
 
     try {
+      // Compress and upload receipt to Supabase Storage if present
+      let billImageUrl = filePreview;
+      if (selectedFile) {
+        billImageUrl = await api.uploadBillReceipt(selectedFile);
+      }
+
       const payload = {
         submitted_by_user_id: user.id,
-        submitter_name: user.full_name || user.username,
+        submitter_name: user.full_name || user.username || (isAdmin ? 'Administrator' : 'Member'),
         category: finalCategory,
         amount: Number(amount),
         description: description.trim(),
-        bill_image_url: filePreview || null,
+        bill_image_url: billImageUrl || null,
+        isAdmin: Boolean(isAdmin),
+        autoApprove: Boolean(isAdmin)
       };
 
       const res = await api.createExpense(payload);
@@ -154,7 +168,9 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
       setDescription('');
       handleRemoveFile();
 
-      await loadWallet();
+      if (!isAdmin) {
+        await loadWallet();
+      }
 
       if (onExpenseSubmitted) onExpenseSubmitted();
     } catch (err) {
@@ -180,26 +196,39 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
       <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 text-white shadow-md border border-slate-700/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-semibold mb-2">
-            <Wallet className="w-3.5 h-3.5" />
-            <span>Finance Management &bull; Expenditure Portal</span>
+            {isAdmin ? (
+              <>
+                <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                <span className="text-purple-300">Treasurer &amp; Executive Portal &bull; Direct Expenditure</span>
+              </>
+            ) : (
+              <>
+                <Wallet className="w-3.5 h-3.5" />
+                <span>Finance Management &bull; Expenditure Portal</span>
+              </>
+            )}
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-white">
-            Submit Expense Bill
+            {isAdmin ? 'Record Approved Expense' : 'Submit Expense Bill'}
           </h1>
-          <p className="text-xs text-slate-300 mt-1">
-            Submit expense receipts for Admin audit. Upon approval, the bill amount is automatically debited from your credited balance.
+          <p className="text-xs text-slate-300 mt-1 max-w-xl">
+            {isAdmin 
+              ? "Submitted directly in Administrator's name. Expenses entered by Admin are automatically approved and immediately registered in official expenditure without requiring review."
+              : "Submit expense receipts for Admin audit. Upon approval, the bill amount is automatically debited from your credited balance."}
           </p>
         </div>
 
         <div className="bg-slate-800/80 border border-slate-700 px-4 py-2 rounded-xl text-right shrink-0">
           <div className="text-[11px] text-slate-400 font-medium">Submitting As</div>
           <div className="text-sm font-bold text-slate-200">{user?.full_name || user?.username}</div>
-          <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Finance Manager</span>
+          <span className={`text-[10px] font-bold uppercase tracking-wider ${isAdmin ? 'text-purple-400' : 'text-emerald-400'}`}>
+            {isAdmin ? 'Administrator (Auto-Approves)' : 'Finance Manager'}
+          </span>
         </div>
       </div>
 
-      {/* Available Balance Card */}
-      {walletData && (
+      {/* Available Balance Card for Finance Managers */}
+      {!isAdmin && walletData && (
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
@@ -229,12 +258,17 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
             </div>
             <div>
               <p className="text-sm font-bold text-emerald-950 flex items-center gap-2">
-                <span>Bill Submitted for Approval</span>
-                <StatusBadge status="PENDING" size="sm" />
+                <span>{isAdmin ? 'Bill Recorded & Auto-Approved' : 'Bill Submitted for Approval'}</span>
+                <StatusBadge status={successExpense.status || (isAdmin ? 'APPROVED' : 'PENDING')} size="sm" />
               </p>
               <p className="text-xs text-emerald-800 mt-0.5">
                 <span className="font-bold">{formatINR(successExpense.amount, true)}</span> under{' '}
-                <span className="font-medium">{successExpense.category}</span> is now queued in the Treasurer's audit list. When approved, it will debit from your balance.
+                <span className="font-medium">{successExpense.category}</span> is{' '}
+                {isAdmin ? (
+                  <>automatically approved in Admin's name and accounted directly in master expenditure.</>
+                ) : (
+                  <>queued in the Treasurer's audit list. When approved, it will debit from your balance.</>
+                )}
               </p>
             </div>
           </div>
@@ -246,7 +280,7 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
                 onClick={onNavigateHistory}
                 className="px-3 py-1.5 text-xs font-bold text-emerald-950 bg-emerald-200 hover:bg-emerald-300 rounded-lg transition cursor-pointer"
               >
-                Track Status
+                {isAdmin ? 'View in Ledger' : 'Track Status'}
               </button>
             )}
             <button
@@ -446,7 +480,16 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
 
         {/* Business Rule Reminder Note */}
         <div className="rounded-xl bg-slate-50 p-3.5 border border-slate-200 text-xs text-slate-600 leading-relaxed">
-          <span className="font-bold text-slate-800">Section 6 Audit Policy:</span> All bills are submitted in <span className="font-bold text-amber-600">PENDING</span> state. Once approved by the Admin, the amount is deducted from your allocated balance and accounted in the official ledger.
+          {isAdmin ? (
+            <>
+              <span className="font-bold text-slate-800">Admin Direct Entry:</span> Bills recorded by Admin are saved in{' '}
+              <span className="font-bold text-emerald-600">APPROVED</span> status under the Administrator name and count immediately in official expenditure. No approval queue step.
+            </>
+          ) : (
+            <>
+              <span className="font-bold text-slate-800">Section 6 Audit Policy:</span> All bills are submitted in <span className="font-bold text-amber-600">PENDING</span> state. Once approved by the Admin, the amount is deducted from your allocated balance and accounted in the official ledger.
+            </>
+          )}
         </div>
 
         {/* Submit Buttons */}
@@ -468,17 +511,19 @@ export default function UploadExpense({ onExpenseSubmitted, onNavigateHistory })
           <button
             type="submit"
             disabled={saving}
-            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-white bg-slate-900 hover:bg-slate-800 shadow-md active:scale-98 transition disabled:opacity-50 cursor-pointer"
+            className={`inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-white shadow-md active:scale-98 transition disabled:opacity-50 cursor-pointer ${
+              isAdmin ? 'bg-purple-700 hover:bg-purple-600' : 'bg-slate-900 hover:bg-slate-800'
+            }`}
           >
             {saving ? (
               <>
                 <span className="animate-spin">⏳</span>
-                <span>Submitting Bill...</span>
+                <span>{isAdmin ? 'Recording Expense...' : 'Submitting Bill...'}</span>
               </>
             ) : (
               <>
                 <Upload className="w-4 h-4" />
-                <span>Submit Bill for Approval</span>
+                <span>{isAdmin ? 'Record & Auto-Approve' : 'Submit Bill for Approval'}</span>
               </>
             )}
           </button>
